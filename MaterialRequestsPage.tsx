@@ -1,17 +1,50 @@
-import React, { useMemo, useState } from "react";
-
-/**
- * 자재 요청(Material Requests) - 1차 기본 페이지
- * 목표(이번 단계): 화면 구조 고정(탭/검색/버튼/리스트 영역) + 라우팅 정상 표시
- * - 백엔드 연동/DB 로직/신규등록/상세 화면은 다음 단계에서 진행
- */
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { api } from "../../lib/api";
 
 type TabKey = "ONGOING" | "DONE" | "CANCELED";
 
+type MRRow = {
+  id: number;
+  project_id: number | null;
+  memo?: string | null;
+  requested_by_name?: string | null;
+  created_at?: string | null;
+  prep_status?: "PREPARING" | "READY" | string | null;
+  project_name?: string | null;
+};
+
+function fmtDate(s?: string | null) {
+  if (!s) return "-";
+  try {
+    const d = new Date(s);
+    if (Number.isNaN(d.getTime())) return s;
+    const yy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yy}-${mm}-${dd}`;
+  } catch {
+    return s;
+  }
+}
+
+function prepLabel(v?: string | null) {
+  if (!v) return "-";
+  if (v === "PREPARING") return "준비중";
+  if (v === "READY") return "준비완료";
+  return v;
+}
+
 export default function MaterialRequestsPage() {
+  const navigate = useNavigate();
+
   const [tab, setTab] = useState<TabKey>("ONGOING");
-  const [year, setYear] = useState<number>(2026);
+  const [year, setYear] = useState<number>(new Date().getFullYear());
   const [keyword, setKeyword] = useState<string>("");
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [rows, setRows] = useState<MRRow[]>([]);
 
   const tabs = useMemo(
     () => [
@@ -22,14 +55,48 @@ export default function MaterialRequestsPage() {
     []
   );
 
+  async function fetchList(next?: { tab?: TabKey; year?: number; keyword?: string }) {
+    const t = next?.tab ?? tab;
+    const y = next?.year ?? year;
+    const q = next?.keyword ?? keyword;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const qs = new URLSearchParams();
+      if (y) qs.set("year", String(y));
+      qs.set("state", t);
+      if (q && q.trim()) qs.set("q", q.trim());
+
+      const res = await api<{ items: MRRow[] }>(`/api/material-requests?${qs.toString()}`);
+      setRows(Array.isArray(res.items) ? res.items : []);
+    } catch (e: any) {
+      setRows([]);
+      setError(e?.message || "목록을 불러오지 못했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function onClickNew() {
-    alert("다음 단계에서 구현: 자재요청 신규 등록");
+    // ✅ 이번 단계 목표: 신규 등록 라우팅
+    navigate("/materials/new");
   }
 
   function onClickSearch() {
-    // 다음 단계에서 API 연동 예정
-    alert("다음 단계에서 구현: 검색/조회 API 연동");
+    fetchList();
   }
+
+  useEffect(() => {
+    fetchList();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    fetchList({ tab });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
 
   return (
     <div style={{ padding: 20 }}>
@@ -37,7 +104,7 @@ export default function MaterialRequestsPage() {
         <div>
           <div style={{ fontSize: 20, fontWeight: 800 }}>자재 요청</div>
           <div style={{ marginTop: 6, fontSize: 13, opacity: 0.75 }}>
-            견적서 연동 자재요청 (1차: 화면 틀 고정)
+            진행중/사업완료/사업취소 자재요청 리스트
           </div>
         </div>
 
@@ -122,6 +189,9 @@ export default function MaterialRequestsPage() {
             <input
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") onClickSearch();
+              }}
               placeholder="검색(사업명/등록자)"
               style={{
                 width: "100%",
@@ -151,13 +221,26 @@ export default function MaterialRequestsPage() {
             검색
           </button>
         </div>
-
-        <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
-          기본값: 연도={2026}년 / 명칭=공란 · 탭에 따라 진행중/사업완료/사업취소 리스트가 표시됩니다.
-        </div>
       </div>
 
-      {/* 리스트 영역(1차: UI 틀만) */}
+      {/* 에러 */}
+      {error && (
+        <div
+          style={{
+            marginTop: 12,
+            padding: 12,
+            borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.12)",
+            background: "rgba(255,0,0,0.08)",
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          <div style={{ fontWeight: 800 }}>불러오기 실패</div>
+          <div style={{ marginTop: 6, fontSize: 12, opacity: 0.9 }}>{error}</div>
+        </div>
+      )}
+
+      {/* 리스트 */}
       <div
         style={{
           marginTop: 14,
@@ -170,6 +253,7 @@ export default function MaterialRequestsPage() {
           {tab === "ONGOING" && "진행중 자재 요청"}
           {tab === "DONE" && "사업완료 자재 요청"}
           {tab === "CANCELED" && "사업취소 자재 요청"}
+          {loading && <span style={{ marginLeft: 10, fontSize: 12, opacity: 0.75 }}>불러오는 중…</span>}
         </div>
 
         <div style={{ width: "100%", overflowX: "auto" }}>
@@ -183,22 +267,45 @@ export default function MaterialRequestsPage() {
               </tr>
             </thead>
             <tbody>
-              <tr>
-                <td colSpan={4} style={{ padding: 16, opacity: 0.75 }}>
-                  아직 데이터가 없습니다. (다음 단계에서 API 연동 후 리스트 출력)
-                </td>
-              </tr>
+              {!loading && rows.length === 0 && (
+                <tr>
+                  <td colSpan={4} style={{ padding: 16, opacity: 0.75 }}>
+                    표시할 데이터가 없습니다.
+                  </td>
+                </tr>
+              )}
+
+              {rows.map((r) => {
+                const title =
+                  (r.project_name && r.project_name.trim()) ||
+                  (r.memo && r.memo.trim()) ||
+                  (r.project_id ? `프로젝트 #${r.project_id}` : `자재요청 #${r.id}`);
+
+                return (
+                  <tr key={r.id} style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                    <td style={{ padding: 12, fontWeight: 700 }}>{title}</td>
+                    <td style={{ padding: 12, opacity: 0.9 }}>{r.requested_by_name || "-"}</td>
+                    <td style={{ padding: 12 }}>
+                      <span
+                        style={{
+                          padding: "6px 10px",
+                          borderRadius: 999,
+                          border: "1px solid rgba(255,255,255,0.15)",
+                          background: r.prep_status === "READY" ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.06)",
+                          fontWeight: 800,
+                          fontSize: 12,
+                        }}
+                      >
+                        {prepLabel(r.prep_status || null)}
+                      </span>
+                    </td>
+                    <td style={{ padding: 12, opacity: 0.85 }}>{fmtDate(r.created_at || null)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
-      </div>
-
-      {/* 안내 */}
-      <div style={{ marginTop: 12, fontSize: 12, opacity: 0.7, lineHeight: 1.5 }}>
-        <div>다음 단계에서 할 일:</div>
-        <div>1) 진행중 리스트 API 연동</div>
-        <div>2) 신규 등록(/materials/new) 라우팅 및 화면</div>
-        <div>3) 상세 화면(/materials/:id) + 품목 준비상태/사용량 변경</div>
       </div>
     </div>
   );
