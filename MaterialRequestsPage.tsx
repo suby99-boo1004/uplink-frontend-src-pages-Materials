@@ -7,24 +7,30 @@ type TabKey = "ONGOING" | "DONE" | "CANCELED";
 type MRRow = {
   id: number;
   project_id: number | null;
+  estimate_id?: number | null;
   memo?: string | null;
   requested_by_name?: string | null;
   created_at?: string | null;
   prep_status?: "PREPARING" | "READY" | string | null;
   project_name?: string | null;
+  estimate_title?: string | null;
+  request_no?: string | null;
+  business_name?: string | null;
 };
 
-function fmtDate(s?: string | null) {
-  if (!s) return "-";
+function fmtDateTimeParts(s?: string | null) {
+  if (!s) return { date: "-", time: "" };
   try {
     const d = new Date(s);
-    if (Number.isNaN(d.getTime())) return s;
+    if (Number.isNaN(d.getTime())) return { date: s, time: "" };
     const yy = d.getFullYear();
     const mm = String(d.getMonth() + 1).padStart(2, "0");
     const dd = String(d.getDate()).padStart(2, "0");
-    return `${yy}-${mm}-${dd}`;
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mi = String(d.getMinutes()).padStart(2, "0");
+    return { date: `${yy}-${mm}-${dd}`, time: `${hh}:${mi}` };
   } catch {
-    return s;
+    return { date: s || "-", time: "" };
   }
 }
 
@@ -260,10 +266,10 @@ export default function MaterialRequestsPage() {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "rgba(255,255,255,0.03)" }}>
+                <th style={{ textAlign: "left", padding: 12, fontSize: 12, opacity: 0.85 }}>등록일</th>
                 <th style={{ textAlign: "left", padding: 12, fontSize: 12, opacity: 0.85 }}>사업명</th>
                 <th style={{ textAlign: "left", padding: 12, fontSize: 12, opacity: 0.85 }}>등록자</th>
                 <th style={{ textAlign: "left", padding: 12, fontSize: 12, opacity: 0.85 }}>준비상태</th>
-                <th style={{ textAlign: "left", padding: 12, fontSize: 12, opacity: 0.85 }}>등록일</th>
               </tr>
             </thead>
             <tbody>
@@ -277,12 +283,22 @@ export default function MaterialRequestsPage() {
 
               {rows.map((r) => {
                 const title =
+                  (r.business_name && r.business_name.trim()) ||
                   (r.project_name && r.project_name.trim()) ||
                   (r.memo && r.memo.trim()) ||
-                  (r.project_id ? `프로젝트 #${r.project_id}` : `자재요청 #${r.id}`);
+                  (r.estimate_title && r.estimate_title.trim()) ||
+                  (r.request_no && r.request_no.trim()) ||
+                  (r.estimate_id ? `견적서#${r.estimate_id}` : (r.project_id ? `프로젝트#${r.project_id}` : `자재요청#${r.id}`));
+
+
+                const dt = fmtDateTimeParts(r.created_at || null);
 
                 return (
-                  <tr key={r.id} style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                  <tr key={r.id} onClick={() => navigate(`/materials/${r.id}`)} style={{ borderTop: "1px solid rgba(255,255,255,0.06)", cursor: "pointer" }}>
+                    <td style={{ padding: 12, opacity: 0.85, whiteSpace: "nowrap" }}>
+                      <div style={{ lineHeight: 1.15 }}>{dt.date}</div>
+                      <div style={{ fontSize: 12, opacity: 0.75, marginTop: 2, lineHeight: 1.1 }}>{dt.time}</div>
+                    </td>
                     <td style={{ padding: 12, fontWeight: 700 }}>{title}</td>
                     <td style={{ padding: 12, opacity: 0.9 }}>{r.requested_by_name || "-"}</td>
                     <td style={{ padding: 12 }}>
@@ -299,7 +315,6 @@ export default function MaterialRequestsPage() {
                         {prepLabel(r.prep_status || null)}
                       </span>
                     </td>
-                    <td style={{ padding: 12, opacity: 0.85 }}>{fmtDate(r.created_at || null)}</td>
                   </tr>
                 );
               })}
