@@ -32,6 +32,8 @@ type MaterialLine = {
   id: string;
   source: LineSource;
   product_id: number | null;
+  // 견적서 라인 원본 ID(있으면 저장 시 함께 전송)
+  estimate_item_id?: number | null;
 
   name: string;
   spec: string;
@@ -104,6 +106,7 @@ function extractMaterialLinesFromEstimateDetail(detail: any): MaterialLine[] {
         id: mkId(),
         source: "ESTIMATE" as const,
         product_id: productId,
+        estimate_item_id: toNum(l?.id) ?? toNum(l?.estimate_item_id) ?? toNum(l?.estimateItemId) ?? null,
         name,
         spec,
         unit,
@@ -161,6 +164,7 @@ export default function MaterialRequestNewPage() {
           source:
             ln.source === "ESTIMATE" ? "FROM_ESTIMATE" : ln.source === "UPLINK_PRODUCT" ? "FROM_PRODUCT" : "MANUAL_TEXT",
           product_id: ln.product_id,
+          estimate_item_id: ln.estimate_item_id ?? null,
           item_name_snapshot: ln.name,
           spec_snapshot: ln.spec,
           unit_snapshot: ln.unit || "EA",
@@ -172,7 +176,7 @@ export default function MaterialRequestNewPage() {
       // undefined 제거
       Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
 
-      await api(`/api/material-requests`, { method: "POST", body: JSON.stringify(payload) });
+      await api(`/api/material-requests?v=1`, { method: "POST", body: JSON.stringify(payload) });
       navigate("/materials");
     } catch (e: any) {
       const msg = e?.message ?? "저장에 실패했습니다.";
@@ -212,23 +216,15 @@ export default function MaterialRequestNewPage() {
         .filter((x: any) => Number.isFinite(x.id));
 
       // 이미 '자재 요청'으로 등록된 견적서는 신규등록 선택 목록에서 제외
-      const mrRes = await api<any>(`/api/material-requests?year=0&state=ONGOING&q=`);
+      const mrRes = await api<any>(`/api/material-requests?year=0&state=ONGOING&q=&v=1`);
       const mrItems = Array.isArray(mrRes) ? mrRes : Array.isArray(mrRes?.items) ? mrRes.items : [];
       const usedEstimateIds = new Set<number>();
-
-      for (const it of mrItems as any[]) {
-        const raw =
-          it?.estimate_id ??
-          it?.estimateId ??
-          it?.estimate?.id ??
-          it?.estimate?.estimate_id ??
-          null;
-        const eid = typeof raw === "string" ? Number(raw) : typeof raw === "number" ? raw : Number(raw);
+      for (const it of mrItems) {
+        const eid = Number((it as any)?.estimate_id);
         if (Number.isFinite(eid) && eid > 0) usedEstimateIds.add(eid);
       }
 
-      // estimate_id 정보를 못 받는(구버전 API) 경우에는 필터링을 시도해도 의미가 없으니 원본 그대로 표시
-      const filtered = usedEstimateIds.size > 0 ? normalized.filter((e) => !usedEstimateIds.has(e.id)) : normalized;
+      const filtered = normalized.filter((e) => !usedEstimateIds.has(e.id));
       setEstimates(filtered);
     } catch (e: any) {
       setEstimates([]);

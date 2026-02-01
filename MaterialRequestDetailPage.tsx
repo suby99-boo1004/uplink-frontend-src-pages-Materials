@@ -1,45 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../../lib/api";
-
-
-function sourceInfo(it: MRItem): { label: string; key: "ESTIMATE" | "PRODUCT" | "MANUAL" } {
-  // 1) 백엔드가 source(예: FROM_ESTIMATE/FROM_PRODUCT/MANUAL_TEXT) 내려주는 경우
-  const s = (it.source || "").toUpperCase();
-  if (s.includes("ESTIMATE")) return { label: "견적서", key: "ESTIMATE" };
-  if (s.includes("PRODUCT")) return { label: "업링크", key: "PRODUCT" };
-  if (s.includes("MANUAL") || s.includes("TEXT")) return { label: "수동", key: "MANUAL" };
-
-  // 2) 키로 추론
-  if (typeof it.estimate_item_id === "number" && it.estimate_item_id > 0) return { label: "견적서", key: "ESTIMATE" };
-  if (typeof it.product_id === "number" && it.product_id > 0) return { label: "업링크", key: "PRODUCT" };
-  return { label: "수동", key: "MANUAL" };
-}
-
-function SourceBadge({ it }: { it: MRItem }) {
-  const info = sourceInfo(it);
-  const bg =
-    info.key === "ESTIMATE" ? "rgba(99,102,241,0.25)" : info.key === "PRODUCT" ? "rgba(34,197,94,0.22)" : "rgba(255,255,255,0.10)";
-  const bd =
-    info.key === "ESTIMATE" ? "rgba(99,102,241,0.45)" : info.key === "PRODUCT" ? "rgba(34,197,94,0.40)" : "rgba(255,255,255,0.18)";
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "6px 10px",
-        borderRadius: 999,
-        border: `1px solid ${bd}`,
-        background: bg,
-        fontWeight: 800,
-        fontSize: 12,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {info.label}
-    </span>
-  );
-}
-
 
 type MRHeader = {
   id: number;
@@ -52,10 +13,11 @@ type MRHeader = {
 
 type MRItem = {
   id: number;
-  // 소스(견적/제품/수동) 판별용: 백엔드가 내려주면 사용, 없으면 다른 키로 추론
+
+  // 분류 판단 키(백엔드가 내려주면 사용)
+  source?: string | null; // FROM_ESTIMATE / FROM_PRODUCT / MANUAL_TEXT ...
   estimate_item_id?: number | null;
   product_id?: number | null;
-  source?: string | null;
 
   item_name_snapshot: string;
   spec_snapshot: string;
@@ -80,6 +42,59 @@ function fmtDateTime(s?: string | null) {
   }
 }
 
+function sourceKey(it: MRItem): "ESTIMATE" | "PRODUCT" | "MANUAL" {
+  const s = (it.source || "").toUpperCase();
+  if (s.includes("ESTIMATE")) return "ESTIMATE";
+  if (s.includes("PRODUCT")) return "PRODUCT";
+  if (s.includes("MANUAL") || s.includes("TEXT")) return "MANUAL";
+
+  // fallback: 키로 추론
+  if (typeof it.estimate_item_id === "number" && it.estimate_item_id > 0) return "ESTIMATE";
+  if (typeof it.product_id === "number" && it.product_id > 0) return "PRODUCT";
+  return "MANUAL";
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return <div style={{ marginTop: 18, fontWeight: 900 }}>{children}</div>;
+}
+
+function ItemsTable({ items, loading }: { items: MRItem[]; loading: boolean }) {
+  return (
+    <div style={{ marginTop: 10, borderRadius: 14, overflow: "hidden", border: "1px solid rgba(255,255,255,0.08)" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr style={{ background: "rgba(255,255,255,0.03)" }}>
+            <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85 }}>자재명</th>
+            <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85 }}>규격</th>
+            <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85, width: 90 }}>단위</th>
+            <th style={{ textAlign: "right", padding: 10, fontSize: 12, opacity: 0.85, width: 110 }}>요청수량</th>
+            <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85, width: 220 }}>비고</th>
+          </tr>
+        </thead>
+        <tbody>
+          {!loading && items.length === 0 && (
+            <tr>
+              <td colSpan={5} style={{ padding: 16, opacity: 0.75 }}>
+                표시할 데이터가 없습니다.
+              </td>
+            </tr>
+          )}
+
+          {items.map((it) => (
+            <tr key={it.id} style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+              <td style={{ padding: 10, fontWeight: 700 }}>{it.item_name_snapshot || "-"}</td>
+              <td style={{ padding: 10, opacity: 0.9 }}>{it.spec_snapshot || "-"}</td>
+              <td style={{ padding: 10, opacity: 0.9 }}>{it.unit_snapshot || "-"}</td>
+              <td style={{ padding: 10, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{Number(it.qty_requested || 0)}</td>
+              <td style={{ padding: 10, opacity: 0.9 }}>{it.note || ""}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function MaterialRequestDetailPage() {
   const navigate = useNavigate();
   const params = useParams();
@@ -90,109 +105,86 @@ export default function MaterialRequestDetailPage() {
   const [header, setHeader] = useState<MRHeader | null>(null);
   const [items, setItems] = useState<MRItem[]>([]);
 
-  async function fetchDetail() {
-    if (!mrId || Number.isNaN(mrId)) {
-      setError("잘못된 자재요청 ID 입니다.");
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await api<{ header: MRHeader; items: MRItem[] }>(`/api/material-requests/${mrId}`);
-      setHeader(res?.header ?? null);
-      setItems(Array.isArray(res?.items) ? res.items : []);
-    } catch (e: any) {
-      setError(e?.message || "상세를 불러오지 못했습니다.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
   useEffect(() => {
+    async function fetchDetail() {
+      if (!mrId || Number.isNaN(mrId)) {
+        setError("잘못된 자재요청 ID 입니다.");
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await api<{ header: MRHeader; items: MRItem[] }>(`/api/material-requests/${mrId}`);
+        setHeader(res?.header ?? null);
+        setItems(Array.isArray(res?.items) ? res.items : []);
+      } catch (e: any) {
+        setError(e?.message || "상세를 불러오지 못했습니다.");
+      } finally {
+        setLoading(false);
+      }
+    }
     fetchDetail();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mrId]);
 
   const title = (header?.memo && header.memo.trim()) || `자재요청 #${mrId}`;
 
+  const grouped = useMemo(() => {
+    const est: MRItem[] = [];
+    const prod: MRItem[] = [];
+    const man: MRItem[] = [];
+    for (const it of items) {
+      const k = sourceKey(it);
+      if (k === "ESTIMATE") est.push(it);
+      else if (k === "PRODUCT") prod.push(it);
+      else man.push(it);
+    }
+    return { est, prod, man };
+  }, [items]);
+
   return (
-    <div style={{ padding: 18, color: "white" }}>
-      <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-          <div>
-            <div style={{ fontSize: 22, fontWeight: 900 }}>{title}</div>
-            <div style={{ marginTop: 6, opacity: 0.85, fontSize: 13 }}>
-              등록자: {header?.requested_by_name || "-"} · 등록일: {fmtDateTime(header?.created_at || null)} · 상태:{" "}
-              {header?.status || "-"}
-            </div>
-          </div>
-
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              type="button"
-              onClick={() => navigate("/materials")}
-              style={{
-                padding: "10px 12px",
-                borderRadius: 10,
-                border: "1px solid rgba(255,255,255,0.15)",
-                background: "rgba(255,255,255,0.06)",
-                color: "white",
-                cursor: "pointer",
-                fontWeight: 900,
-              }}
-            >
-              목록으로
-            </button>
+    <div style={{ padding: 20 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 900 }}>{title}</div>
+          <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
+            등록자: {header?.requested_by_name || "-"} · 등록일: {fmtDateTime(header?.created_at || null)} · 상태: {header?.status || "-"}
           </div>
         </div>
 
-        {error && (
-          <div style={{ padding: 12, borderRadius: 12, border: "1px solid rgba(239,68,68,0.35)", background: "rgba(239,68,68,0.12)" }}>
-            <div style={{ fontWeight: 900, marginBottom: 6 }}>불러오기 실패</div>
-            <div style={{ opacity: 0.95, whiteSpace: "pre-wrap" }}>{error}</div>
-          </div>
-        )}
-
-        <div style={{ marginTop: 12, borderRadius: 14, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)", overflow: "hidden" }}>
-          <div style={{ padding: "12px 14px", borderBottom: "1px solid rgba(255,255,255,0.08)", fontWeight: 900 }}>
-            요청 항목 {loading ? "(불러오는 중…)" : `(${items.length})`}
-          </div>
-
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ background: "rgba(255,255,255,0.03)" }}>
-                  <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85, width: 90 }}>구분</th>
-                  <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85 }}>자재명</th>
-                  <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85 }}>규격</th>
-                  <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85, width: 90 }}>단위</th>
-                  <th style={{ textAlign: "right", padding: 10, fontSize: 12, opacity: 0.85, width: 110 }}>요청수량</th>
-                  <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85, width: 220 }}>비고</th>
-                </tr>
-              </thead>
-              <tbody>
-                {!loading && items.length === 0 && (
-                  <tr>
-                    <td colSpan={6} style={{ padding: 16, opacity: 0.75 }}>
-                      표시할 데이터가 없습니다.
-                    </td>
-                  </tr>
-                )}
-                {items.map((it) => (
-                  <tr key={it.id} style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-                    <td style={{ padding: 10 }}><SourceBadge it={it} /></td>
-                    <td style={{ padding: 10, fontWeight: 700 }}>{it.item_name_snapshot || "-"}</td>
-                    <td style={{ padding: 10, opacity: 0.9 }}>{it.spec_snapshot || "-"}</td>
-                    <td style={{ padding: 10, opacity: 0.9 }}>{it.unit_snapshot || "-"}</td>
-                    <td style={{ padding: 10, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{Number(it.qty_requested || 0)}</td>
-                    <td style={{ padding: 10, opacity: 0.9 }}>{it.note || ""}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <button
+          type="button"
+          onClick={() => navigate("/materials")}
+          style={{
+            padding: "10px 12px",
+            borderRadius: 10,
+            border: "1px solid rgba(255,255,255,0.15)",
+            background: "rgba(255,255,255,0.06)",
+            color: "white",
+            cursor: "pointer",
+            fontWeight: 900,
+          }}
+        >
+          목록으로
+        </button>
       </div>
+
+      {error && (
+        <div style={{ marginTop: 14, padding: 12, borderRadius: 12, border: "1px solid rgba(255,80,80,0.35)", background: "rgba(255,80,80,0.10)" }}>
+          <div style={{ fontWeight: 900, marginBottom: 6 }}>불러오기 실패</div>
+          <div style={{ opacity: 0.9 }}>{error}</div>
+        </div>
+      )}
+
+      <div style={{ marginTop: 18, fontWeight: 900 }}>요청 항목 {loading ? "(불러오는 중…)" : `(${items.length})`}</div>
+
+      <SectionTitle>견적서 리스트 ({grouped.est.length})</SectionTitle>
+      <ItemsTable items={grouped.est} loading={loading} />
+
+      <SectionTitle>업링크 자재 리스트 ({grouped.prod.length})</SectionTitle>
+      <ItemsTable items={grouped.prod} loading={loading} />
+
+      <SectionTitle>수동 자재 리스트 ({grouped.man.length})</SectionTitle>
+      <ItemsTable items={grouped.man} loading={loading} />
     </div>
   );
 }
