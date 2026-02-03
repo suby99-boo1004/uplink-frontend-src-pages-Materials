@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { api } from "../../lib/api";
 
 type TabKey = "ONGOING" | "DONE" | "CANCELED";
@@ -43,6 +43,7 @@ function prepLabel(v?: string | null) {
 
 export default function MaterialRequestsPage() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [tab, setTab] = useState<TabKey>("ONGOING");
   const [year, setYear] = useState<number>(new Date().getFullYear());
@@ -51,6 +52,7 @@ export default function MaterialRequestsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<MRRow[]>([]);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const tabs = useMemo(
     () => [
@@ -75,6 +77,8 @@ export default function MaterialRequestsPage() {
       qs.set("state", t);
       if (q && q.trim()) qs.set("q", q.trim());
 
+      qs.set("_ts", String(Date.now()));
+
       const res = await api<{ items: MRRow[] }>(`/api/material-requests?${qs.toString()}`);
       setRows(Array.isArray(res.items) ? res.items : []);
     } catch (e: any) {
@@ -94,15 +98,41 @@ export default function MaterialRequestsPage() {
     fetchList();
   }
 
+    
+  // 관리자만 "삭제" 버튼 노출
   useEffect(() => {
-    fetchList();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    (async () => {
+      try {
+        const me = await api<any>(`/api/auth/me?_ts=${Date.now()}`);
+        const rid = Number(me?.role?.id ?? me?.role_id ?? me?.roleId ?? me?.role?.role_id ?? null);
+        setIsAdmin(rid === 6);
+      } catch {
+        setIsAdmin(false);
+      }
+    })();
   }, []);
 
-  useEffect(() => {
+useEffect(() => {
     fetchList({ tab });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
+  }, [tab, location.search]);
+
+
+  async function onDelete(mrId: number) {
+    if (!isAdmin) return;
+    const ok = window.confirm(
+      "이 자재요청을 삭제할까요?\n삭제하면 신규등록(견적서 선택)에도 즉시 반영됩니다."
+    );
+    if (!ok) return;
+
+    try {
+      await api(`/api/material-requests/${mrId}`, { method: "DELETE" });
+      // ✅ 삭제 후: 현재 탭/검색조건 그대로 재조회
+      await fetchList();
+    } catch (e: any) {
+      alert(e?.message || "삭제에 실패했습니다.");
+    }
+  }
 
   return (
     <div style={{ padding: 20 }}>
@@ -120,15 +150,15 @@ export default function MaterialRequestsPage() {
             onClick={onClickNew}
             style={{
               padding: "10px 12px",
-              borderRadius: 10,
+              borderRadius: 12,
               border: "1px solid rgba(255,255,255,0.15)",
-              background: "rgba(255,255,255,0.06)",
+              background: "linear-gradient(180deg, #2563EB 0%, #1D4ED8 100%)",
               color: "white",
               cursor: "pointer",
-              fontWeight: 700,
+              fontWeight: 900,
             }}
           >
-            신규 등록
+            + 신규 등록
           </button>
         </div>
       </div>
@@ -149,7 +179,7 @@ export default function MaterialRequestsPage() {
                 background: active ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.06)",
                 color: "white",
                 cursor: "pointer",
-                fontWeight: 800,
+                fontWeight: 700,
               }}
             >
               {t.label}
@@ -221,7 +251,7 @@ export default function MaterialRequestsPage() {
               background: "rgba(255,255,255,0.06)",
               color: "white",
               cursor: "pointer",
-              fontWeight: 800,
+              fontWeight: 700,
             }}
           >
             검색
@@ -263,19 +293,25 @@ export default function MaterialRequestsPage() {
         </div>
 
         <div style={{ width: "100%", overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", minWidth: 900 }}>
             <thead>
               <tr style={{ background: "rgba(255,255,255,0.03)" }}>
-                <th style={{ textAlign: "left", padding: 12, fontSize: 12, opacity: 0.85 }}>등록일</th>
-                <th style={{ textAlign: "left", padding: 12, fontSize: 12, opacity: 0.85 }}>사업명</th>
-                <th style={{ textAlign: "left", padding: 12, fontSize: 12, opacity: 0.85 }}>등록자</th>
-                <th style={{ textAlign: "left", padding: 12, fontSize: 12, opacity: 0.85 }}>준비상태</th>
+                <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85, width: 120, whiteSpace: "nowrap" }}>등록일</th>
+                <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85 }}>사업명</th>
+                <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85, width: 140, whiteSpace: "nowrap" }}>등록자</th>
+                <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85, width: 120, whiteSpace: "nowrap" }}>준비상태</th>
+              
+                {isAdmin && (
+                  <th style={{ textAlign: "right", padding: 10, fontSize: 12, opacity: 0.85, width: 92, whiteSpace: "nowrap" }}>
+                    삭제
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>
               {!loading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={4} style={{ padding: 16, opacity: 0.75 }}>
+                  <td colSpan={isAdmin ? 5 : 4} style={{ padding: 16, opacity: 0.75 }}>
                     표시할 데이터가 없습니다.
                   </td>
                 </tr>
@@ -295,27 +331,64 @@ export default function MaterialRequestsPage() {
 
                 return (
                   <tr key={r.id} onClick={() => navigate(`/materials/${r.id}`)} style={{ borderTop: "1px solid rgba(255,255,255,0.06)", cursor: "pointer" }}>
-                    <td style={{ padding: 12, opacity: 0.85, whiteSpace: "nowrap" }}>
+                    <td style={{ padding: 10, opacity: 0.85, whiteSpace: "nowrap", width: 120 }}>
                       <div style={{ lineHeight: 1.15 }}>{dt.date}</div>
                       <div style={{ fontSize: 12, opacity: 0.75, marginTop: 2, lineHeight: 1.1 }}>{dt.time}</div>
                     </td>
-                    <td style={{ padding: 12, fontWeight: 700 }}>{title}</td>
-                    <td style={{ padding: 12, opacity: 0.9 }}>{r.requested_by_name || "-"}</td>
-                    <td style={{ padding: 12 }}>
+                    <td style={{ padding: 10, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={title}>{title}</td>
+                    <td style={{ padding: 10, opacity: 0.9, width: 140, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.requested_by_name || "-"}</td>
+                    <td style={{ padding: 10, width: 120, whiteSpace: "nowrap" }}>
                       <span
                         style={{
                           padding: "6px 10px",
                           borderRadius: 999,
                           border: "1px solid rgba(255,255,255,0.15)",
                           background: r.prep_status === "READY" ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.06)",
-                          fontWeight: 800,
+                          fontWeight: 700,
                           fontSize: 12,
                         }}
                       >
                         {prepLabel(r.prep_status || null)}
                       </span>
                     </td>
-                  </tr>
+                  
+                
+{isAdmin && (
+  <td className="px-3 py-2 text-right">
+    <button
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onDelete(r.id);
+      }}
+      title="삭제(관리자 전용)"
+      style={{
+        minWidth: 56,
+        height: 24,
+        borderRadius: 999,
+        border: "1.5px solid rgba(239,68,68,0.85)",
+        background: "linear-gradient(180deg, rgba(20,20,20,0.95), rgba(10,10,10,0.95))",
+        color: "#F87171",
+        fontWeight: 700,
+        letterSpacing: "0.02em",
+        boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.02)",
+        cursor: "pointer",
+      }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.background =
+          "linear-gradient(180deg, rgba(40,10,10,0.95), rgba(20,8,8,0.95))";
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.background =
+          "linear-gradient(180deg, rgba(20,20,20,0.95), rgba(10,10,10,0.95))";
+      }}
+    >
+      삭제
+    </button>
+  </td>
+)}
+
+</tr>
                 );
               })}
             </tbody>

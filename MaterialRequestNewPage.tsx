@@ -32,7 +32,6 @@ type MaterialLine = {
   id: string;
   source: LineSource;
   product_id: number | null;
-  // 견적서 라인 원본 ID(있으면 저장 시 함께 전송)
   estimate_item_id?: number | null;
 
   name: string;
@@ -132,8 +131,7 @@ function extractMaterialLinesFromEstimateDetail(detail: any): MaterialLine[] {
 
 export default function MaterialRequestNewPage() {
   const navigate = useNavigate();
-  const auth = (useAuth() as any) ?? null;
-  const user = auth?.user ?? null;
+  const { user } = useAuth() as any;
 
   const [mode, setMode] = useState<Mode>("ESTIMATE");
   const [projectName, setProjectName] = useState("");
@@ -144,47 +142,54 @@ export default function MaterialRequestNewPage() {
   const [errorEst, setErrorEst] = useState<string | null>(null);
 
   const [lines, setLines] = useState<MaterialLine[]>([]);
+
+  // 분류 안정화: estimate_item_id 없는 ESTIMATE 라인은 수동으로 간주(수동 추가가 견적 섹션으로 섞이는 현상 방지)
+  const normalizedLines = useMemo(() =>
+    lines.map((ln) =>
+      ln.source === "ESTIMATE" && !(ln as any).estimate_item_id ? { ...ln, source: "MANUAL" as const } : ln
+    ),
+    [lines]
+  );
   const [loadingLines, setLoadingLines] = useState(false);
   const [errorLines, setErrorLines] = useState<string | null>(null);
 
-  
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  const handleSave = async () => {
+  
+  async function handleSave() {
+    setSaving(true);
+    setSaveError(null);
     try {
-      setSaving(true);
-      setSaveError(null);
-
-      // 최소 헤더/라인 payload 구성 (백엔드 스키마에 맞춰 필요시 조정)
       const payload: any = {
-        memo: mode === "MANUAL" ? projectName : undefined,
-        estimate_id: mode === "ESTIMATE" && estimateId !== "" ? Number(estimateId) : undefined,
+        project_name: mode === "MANUAL" ? (projectName || "") : "",
+        memo: mode === "MANUAL" ? (projectName || "") : "",
+        estimate_id: mode === "ESTIMATE" && estimateId ? Number(estimateId) : null,
         items: lines.map((ln) => ({
-          source:
-            ln.source === "ESTIMATE" ? "FROM_ESTIMATE" : ln.source === "UPLINK_PRODUCT" ? "FROM_PRODUCT" : "MANUAL_TEXT",
-          product_id: ln.product_id,
-          estimate_item_id: ln.estimate_item_id ?? null,
-          item_name_snapshot: ln.name,
-          spec_snapshot: ln.spec,
-          unit_snapshot: ln.unit || "EA",
-          qty_requested: Number(ln.qty) || 0,
-          note: ln.note || "",
+          source: ln.source,
+          product_id: ln.product_id ?? null,
+          estimate_item_id: (ln as any).estimate_item_id ?? null,
+          item_name_snapshot: ln.name ?? "",
+          spec_snapshot: ln.spec ?? "",
+          unit_snapshot: ln.unit ?? "EA",
+          qty_requested: Number(ln.qty ?? 0),
+          note: ln.note ?? "",
         })),
       };
-
-      // undefined 제거
-      Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
+      // null/undefined 정리
+      Object.keys(payload).forEach((k) => (payload[k] === null || payload[k] === undefined) && delete payload[k]);
 
       await api(`/api/material-requests?v=1`, { method: "POST", body: JSON.stringify(payload) });
-      navigate("/materials");
+
+      // 저장 후 리스트 강제 재조회(메인 페이지는 location.search 변화 감지)
+      navigate(`/materials?refresh=${Date.now()}`);
     } catch (e: any) {
-      const msg = e?.message ?? "저장에 실패했습니다.";
-      setSaveError(msg);
+      setSaveError(e?.message || "등록에 실패했습니다.");
     } finally {
       setSaving(false);
     }
-  };
+  }
+
 // 제품 선택 모달
   const [productModalOpen, setProductModalOpen] = useState(false);
   const [productKeyword, setProductKeyword] = useState("");
@@ -192,9 +197,14 @@ export default function MaterialRequestNewPage() {
   const [productError, setProductError] = useState<string | null>(null);
   const [products, setProducts] = useState<ProductRow[]>([]);
 
-  const estimateLines = lines.filter((x) => x.source === "ESTIMATE");
-  const uplinkProductLines = lines.filter((x) => x.source === "UPLINK_PRODUCT");
-  const manualLines = lines.filter((x) => x.source === "MANUAL");
+  // 견적 라인: source=ESTIMATE 이면서 estimate_item_id가 있는 것만 (수동 추가가 견적 섹션으로 섞이는 현상 방지)
+  const estimateLines = normalizedLines.filter((x: any) => x.source === "ESTIMATE" && !!x.estimate_item_id);
+
+  const uplinkProductLines = normalizedLines.filter((x) => x.source === "UPLINK_PRODUCT");
+
+  // 수동 라인: MANUAL + (estimate_item_id 없는 ESTIMATE 라인) 전부
+  const manualLines = normalizedLines.filter((x: any) => x.source === "MANUAL" || (x.source === "ESTIMATE" && !x.estimate_item_id));
+
 
   async function loadEstimatesOngoing() {
     setLoadingEst(true);
@@ -215,16 +225,14 @@ export default function MaterialRequestNewPage() {
         }))
         .filter((x: any) => Number.isFinite(x.id));
 
-      // 이미 '자재 요청'으로 등록된 견적서는 신규등록 선택 목록에서 제외
-      const mrRes = await api<any>(`/api/material-requests?year=0&state=ONGOING&q=&v=1`);
+      const mrRes = await api<any>(`/api/material-requests?year=0&state=ONGOING&q=&v=1&_ts=${Date.now()}`);
       const mrItems = Array.isArray(mrRes) ? mrRes : Array.isArray(mrRes?.items) ? mrRes.items : [];
       const usedEstimateIds = new Set<number>();
-      for (const it of mrItems) {
-        const eid = Number((it as any)?.estimate_id);
+      for (const it of mrItems as any[]) {
+        const eid = Number(it?.estimate_id ?? it?.estimateId ?? null);
         if (Number.isFinite(eid) && eid > 0) usedEstimateIds.add(eid);
       }
-
-      const filtered = normalized.filter((e) => !usedEstimateIds.has(e.id));
+      const filtered = usedEstimateIds.size > 0 ? normalized.filter((e) => !usedEstimateIds.has(e.id)) : normalized;
       setEstimates(filtered);
     } catch (e: any) {
       setEstimates([]);
@@ -247,7 +255,6 @@ export default function MaterialRequestNewPage() {
         ...prev.filter((x) => x.source === "UPLINK_PRODUCT"),
         ...prev.filter((x) => x.source === "MANUAL"),
       ]);
-
       const fallbackName =
         (detail?.title ?? detail?.project_name ?? detail?.projectName ?? "")?.toString().trim() || `견적서 #${estimateIdNum}`;
       if (!projectName.trim()) setProjectName(fallbackName);
@@ -406,7 +413,7 @@ export default function MaterialRequestNewPage() {
   function GroupRow({ title }: { title: string }) {
     return (
       <tr>
-        <td colSpan={5} style={{ padding: 10, fontWeight: 900, background: "rgba(255,255,255,0.06)" }}>
+        <td colSpan={8} style={{ padding: 10, fontWeight: 900, background: "rgba(255,255,255,0.06)" }}>
           {title}
         </td>
       </tr>
@@ -446,7 +453,7 @@ export default function MaterialRequestNewPage() {
           >
             목록으로
           </button>
-        </div>
+</div>
       </div>
 
       {/* 자재요청사업명 + 등록자 */}
@@ -604,110 +611,151 @@ export default function MaterialRequestNewPage() {
         {errorLines && <div style={{ marginTop: 10, fontSize: 12, color: "#ffb4b4" }}>{errorLines}</div>}
 
         <div style={{ marginTop: 12, width: "100%", overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ background: "rgba(255,255,255,0.03)" }}>
-                <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85 }}>자재명</th>
-                <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85 }}>규격</th>
-                <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85, width: 90 }}>단위</th>
-                <th style={{ textAlign: "right", padding: 10, fontSize: 12, opacity: 0.85, width: 110 }}>요청수량</th>
-                <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85, width: 220 }}>비고</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {!hasAnyLines && !loadingLines && (
-                <tr>
-                  <td colSpan={5} style={{ padding: 12, opacity: 0.75 }}>
-                    견적서를 선택하면 재료비(자동 입력)가 표시됩니다. 또는 “업링크 제품 추가 / 수동 추가”로 항목을 넣으세요.
-                  </td>
+          
+      {(() => {
+        const renderTable = (list: any[], emptyHint?: string) => (
+          <div style={{ marginTop: 10, borderRadius: 14, overflow: "hidden", border: "1px solid rgba(255,255,255,0.08)" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: "rgba(255,255,255,0.03)" }}>
+                  <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85 }}>자재명</th>
+                  <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85 }}>규격</th>
+                  <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85, width: 90 }}>단위</th>
+                  <th style={{ textAlign: "right", padding: 10, fontSize: 12, opacity: 0.85, width: 110 }}>요청수량</th>
+                  <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85, width: 220 }}>비고</th>
                 </tr>
-              )}
+              </thead>
+              <tbody>
+                {!loadingLines && list.length === 0 && (
+                  <tr>
+                    <td colSpan={5} style={{ padding: 16, opacity: 0.75 }}>
+                      {emptyHint || "표시할 데이터가 없습니다."}
+                    </td>
+                  </tr>
+                )}
 
-              {estimateLines.length > 0 && <GroupRow title={`견적서 재료비(자동 입력) · ${estimateLines.length}건`} />}
-              {estimateLines.map((ln) => (
-                <tr key={ln.id} style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-                  <td style={{ padding: 10 }}>
-                    <input
-                      value={ln.name}
-                      onChange={(e) => updateLine(ln.id, { name: e.target.value })}
-                      style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.7)", color: "white", outline: "none" }}
-                    />
-                  </td>
-                  <td style={{ padding: 10 }}>
-                    <input
-                      value={ln.spec}
-                      onChange={(e) => updateLine(ln.id, { spec: e.target.value })}
-                      style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.7)", color: "white", outline: "none" }}
-                    />
-                  </td>
-                  <td style={{ padding: 10 }}>
-                    <input
-                      value={ln.unit}
-                      onChange={(e) => updateLine(ln.id, { unit: e.target.value })}
-                      style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.7)", color: "white", outline: "none" }}
-                    />
-                  </td>
-                  <td style={{ padding: 10 }}>
-                    <input
-                      value={Number.isFinite(ln.qty) ? String(ln.qty) : "0"}
-                      onChange={(e) => updateLine(ln.id, { qty: Number(e.target.value) || 0 })}
-                      inputMode="decimal"
-                      style={{ width: "100%", textAlign: "right", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.7)", color: "white", outline: "none" }}
-                    />
-                  </td>                  <td style={{ padding: 10 }}>
-                    <input
-                      value={ln.note}
-                      onChange={(e) => updateLine(ln.id, { note: e.target.value })}
-                      placeholder="비고"
-                      style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.7)", color: "white", outline: "none" }}
-                    />
-                  </td>
-                </tr>
-              ))}
+                {list.map((ln: any) => (
+                  <tr key={ln.id} style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                    <td style={{ padding: 10 }}>
+                      <input
+                        value={ln.name}
+                        onChange={(e) => updateLine(ln.id, { name: e.target.value })}
+                        placeholder="자재명"
+                        style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.7)", color: "white", outline: "none" }}
+                      />
+                    </td>
+                    <td style={{ padding: 10 }}>
+                      <input
+                        value={ln.spec}
+                        onChange={(e) => updateLine(ln.id, { spec: e.target.value })}
+                        placeholder="규격"
+                        style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.7)", color: "white", outline: "none" }}
+                      />
+                    </td>
+                    <td style={{ padding: 10 }}>
+                      <input
+                        value={ln.unit}
+                        onChange={(e) => updateLine(ln.id, { unit: e.target.value })}
+                        placeholder="단위"
+                        style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.7)", color: "white", outline: "none" }}
+                      />
+                    </td>
+                    <td style={{ padding: 10, textAlign: "right" }}>
+                      <input
+                        value={String(ln.qty ?? 0)}
+                        onChange={(e) => updateLine(ln.id, { qty: Number(e.target.value) || 0 })}
+                        placeholder="0"
+                        style={{ width: "100%", textAlign: "right", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.7)", color: "white", outline: "none", fontVariantNumeric: "tabular-nums" }}
+                      />
+                    </td>
+                    <td style={{ padding: 10 }}>
+                      <input
+                        value={ln.note || ""}
+                        onChange={(e) => updateLine(ln.id, { note: e.target.value })}
+                        placeholder="비고"
+                        style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.7)", color: "white", outline: "none" }}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
 
-              {uplinkProductLines.length > 0 && <GroupRow title={`업링크 제품 · ${uplinkProductLines.length}건`} />}
-              {uplinkProductLines.map((ln) => (
-                <tr key={ln.id} style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-                  <td style={{ padding: 10 }}>
-                    <input value={ln.name} onChange={(e) => updateLine(ln.id, { name: e.target.value })} style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.7)", color: "white", outline: "none" }} />
-                  </td>
-                  <td style={{ padding: 10 }}>
-                    <input value={ln.spec} onChange={(e) => updateLine(ln.id, { spec: e.target.value })} style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.7)", color: "white", outline: "none" }} />
-                  </td>
-                  <td style={{ padding: 10 }}>
-                    <input value={ln.unit} onChange={(e) => updateLine(ln.id, { unit: e.target.value })} style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.7)", color: "white", outline: "none" }} />
-                  </td>
-                  <td style={{ padding: 10 }}>
-                    <input value={Number.isFinite(ln.qty) ? String(ln.qty) : "0"} onChange={(e) => updateLine(ln.id, { qty: Number(e.target.value) || 0 })} inputMode="decimal" style={{ width: "100%", textAlign: "right", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.7)", color: "white", outline: "none" }} />
-                  </td>                  <td style={{ padding: 10 }}>
-                    <input value={ln.note} onChange={(e) => updateLine(ln.id, { note: e.target.value })} placeholder="비고" style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.7)", color: "white", outline: "none" }} />
-                  </td>
-                </tr>
-              ))}
+        return (
+          <>
+            {(() => {
+              const mkSectionBox = (opts: {
+                title: string;
+                count: number;
+                kind: "estimate" | "uplink" | "manual";
+                children: React.ReactNode;
+              }) => {
+                const { title, count, kind, children } = opts;
 
-              {manualLines.length > 0 && <GroupRow title={`수동 추가 · ${manualLines.length}건`} />}
-              {manualLines.map((ln) => (
-                <tr key={ln.id} style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-                  <td style={{ padding: 10 }}>
-                    <input value={ln.name} onChange={(e) => updateLine(ln.id, { name: e.target.value })} placeholder="자재명" style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.7)", color: "white", outline: "none" }} />
-                  </td>
-                  <td style={{ padding: 10 }}>
-                    <input value={ln.spec} onChange={(e) => updateLine(ln.id, { spec: e.target.value })} placeholder="규격" style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.7)", color: "white", outline: "none" }} />
-                  </td>
-                  <td style={{ padding: 10 }}>
-                    <input value={ln.unit} onChange={(e) => updateLine(ln.id, { unit: e.target.value })} placeholder="단위" style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.7)", color: "white", outline: "none" }} />
-                  </td>
-                  <td style={{ padding: 10 }}>
-                    <input value={Number.isFinite(ln.qty) ? String(ln.qty) : "0"} onChange={(e) => updateLine(ln.id, { qty: Number(e.target.value) || 0 })} placeholder="0" inputMode="decimal" style={{ width: "100%", textAlign: "right", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.7)", color: "white", outline: "none" }} />
-                  </td>                  <td style={{ padding: 10 }}>
-                    <input value={ln.note} onChange={(e) => updateLine(ln.id, { note: e.target.value })} placeholder="비고" style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.7)", color: "white", outline: "none" }} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                const styleMap: Record<string, any> = {
+                  estimate: { border: "1px solid rgba(59,130,246,0.55)", bg: "rgba(59,130,246,0.10)" },
+                  uplink: { border: "1px solid rgba(34,197,94,0.55)", bg: "rgba(34,197,94,0.10)" },
+                  manual: { border: "1px solid rgba(245,158,11,0.55)", bg: "rgba(245,158,11,0.10)" },
+                };
+                const s = styleMap[kind] || styleMap.manual;
+
+                return (
+                  <div
+                    style={{
+                      marginTop: 16,
+                      borderRadius: 14,
+                      border: s.border,
+                      background: s.bg,
+                      padding: 14,
+                    }}
+                  >
+                    <div style={{ fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span>{title}</span>
+                      <span style={{ fontVariantNumeric: "tabular-nums", opacity: 0.85 }}>({count})</span>
+                    </div>
+                    <div style={{ marginTop: 10 }}>{children}</div>
+                  </div>
+                );
+              };
+
+              const showEstimateSection = mode === "ESTIMATE" && !!estimateId;
+              const showUplinkSection = uplinkProductLines.length > 0;
+              const showManualSection = manualLines.length > 0;
+
+              return (
+                <>
+                  {showEstimateSection &&
+                    mkSectionBox({
+                      title: `견적서 리스트${loadingLines ? " (불러오는 중…)" : ""}`,
+                      count: estimateLines.length,
+                      kind: "estimate",
+                      children: renderTable(estimateLines, "견적서를 선택하면 재료비(자동 입력)가 표시됩니다."),
+                    })}
+
+                  {showUplinkSection &&
+                    mkSectionBox({
+                      title: "업링크 자재 리스트",
+                      count: uplinkProductLines.length,
+                      kind: "uplink",
+                      children: renderTable(uplinkProductLines, "업링크 제품 추가로 항목을 넣으세요."),
+                    })}
+
+                  {showManualSection &&
+                    mkSectionBox({
+                      title: "수동 자재 리스트",
+                      count: manualLines.length,
+                      kind: "manual",
+                      children: renderTable(manualLines, "수동 추가로 항목을 넣으세요."),
+                    })}
+                </>
+              );
+            })()}
+          </>
+        );
+      })()}
+
 
         <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
           · 구분 순서: 견적서 재료비(자동입력) → 업링크 제품 → 수동 추가 (표 맨 앞 구분 컬럼은 제거됨)
@@ -855,13 +903,14 @@ export default function MaterialRequestNewPage() {
             background: saving ? "rgba(255,255,255,0.08)" : "rgba(99,102,241,0.9)",
             color: "white",
             cursor: saving ? "not-allowed" : "pointer",
-            fontWeight: 700,
+            fontWeight: 800,
           }}
         >
           {saving ? "등록 중…" : "등록 완료"}
         </button>
       </div>
-    </div>
 
+    </div>
+    </div>
   );
 }
