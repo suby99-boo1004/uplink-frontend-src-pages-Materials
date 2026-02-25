@@ -404,34 +404,64 @@ export default function MaterialRequestDetailPage() {
   }
 
   function renderEditableTable(list: MRItem[], allowDelete: boolean, kind: SectionKind) {
+    const showSensitive = canSeeSensitive; // role.id 6(관리자),7(운영자)만 민감정보/조작 표시
     return (
       <div style={{ borderRadius: 14, overflow: "hidden", border: "1px solid rgba(255,255,255,0.10)" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 80px 110px 100px 130px 130px 220px 70px", gap: 8, padding: "10px 12px", fontWeight: 900, opacity: 0.85, background: "rgba(255,255,255,0.06)" }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: showSensitive
+              ? "1.2fr 1fr 80px 110px 100px 130px 130px 220px 70px"
+              : "1.2fr 1fr 80px 110px 1fr",
+            gap: 8,
+            padding: "10px 12px",
+            fontWeight: 900,
+            opacity: 0.85,
+            background: "rgba(255,255,255,0.06)",
+          }}
+        >
           <div>자재명</div>
           <div>규격</div>
           <div>단위</div>
           <div style={{ textAlign: "right" }}>요청수량</div>
-          <div style={{ textAlign: "right" }}>현재수량</div>
-          <div style={{ textAlign: "right" }}>사용수량</div>
-          <div style={{ textAlign: "right" }}>재고(잔량) </div>
-          <div>준비상황 / 비고</div>
-          <div style={{ textAlign: "center" }}>삭제</div>
+
+          {showSensitive && <div style={{ textAlign: "right" }}>현재수량</div>}
+          {showSensitive && <div style={{ textAlign: "right" }}>사용수량</div>}
+          {showSensitive && <div style={{ textAlign: "right" }}>재고(잔량)</div>}
+
+          <div>{showSensitive ? "준비상황 / 비고" : "비고"}</div>
+
+          {showSensitive && <div style={{ textAlign: "center" }}>삭제</div>}
         </div>
 
         {list.map((it) => {
           const qtyOnHand = it.qty_on_hand == null ? null : num(it.qty_on_hand);
           const usedDefault = it.qty_used == null || (num(it.qty_used) === 0 && num(it.qty_requested) > 0) ? num(it.qty_requested) : num(it.qty_used);
           const stockChange = qtyOnHand == null ? null : qtyOnHand - usedDefault;
+          const isReady = ((it.prep_status || '').toUpperCase() === 'READY');
 
           return (
-            <div key={it.id} style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 80px 110px 100px 130px 130px 220px 70px", gap: 8, padding: "10px 12px", borderTop: "1px solid rgba(255,255,255,0.06)", background: ((it.prep_status || '').toUpperCase() === 'READY' ? 'rgba(255,255,255,0.06)' : 'transparent'), opacity: ((it.prep_status || '').toUpperCase() === 'READY' ? 0.75 : 1) }}>
+            <div
+            key={it.id}
+            style={{
+              display: "grid",
+              gridTemplateColumns: showSensitive
+                ? "1.2fr 1fr 80px 110px 100px 130px 130px 220px 70px"
+                : "1.2fr 1fr 80px 110px 1fr",
+              gap: 8,
+              padding: "10px 12px",
+              borderTop: "1px solid rgba(255,255,255,0.06)",
+              background: ((it.prep_status || "").toUpperCase() === "READY" ? "rgba(255,255,255,0.06)" : "transparent"),
+              opacity: ((it.prep_status || "").toUpperCase() === "READY" ? 0.75 : 1),
+            }}
+          >
               <div style={{ fontWeight: 900 }}>{it.item_name_snapshot || "-"}</div>
               <div style={{ opacity: 0.95 }}>{it.spec_snapshot || "-"}</div>
               <div style={{ opacity: 0.95 }}>{it.unit_snapshot || "-"}</div>
 
               <input
                 defaultValue={num(it.qty_requested)}
-                disabled={kind === "estimate"}
+                disabled={kind === "estimate" || isReady}
                 onBlur={(e) => {
                   const v = num(e.currentTarget.value);
                   const prev = num(it.qty_requested);
@@ -463,23 +493,28 @@ export default function MaterialRequestDetailPage() {
                   padding: "8px 10px",
                   borderRadius: 10,
                   border: "1px solid rgba(255,255,255,0.12)",
-                  background: kind === "estimate" ? "rgba(255,255,255,0.06)" : "rgba(17,24,39,0.65)",
+                  background: (kind === "estimate" || isReady) ? "rgba(255,255,255,0.06)" : "rgba(17,24,39,0.65)",
                   color: "white",
                   outline: "none",
                   fontVariantNumeric: "tabular-nums",
-                  cursor: kind === "estimate" ? "not-allowed" : "text",
-                  opacity: kind === "estimate" ? 0.7 : 1,
+                  cursor: (kind === "estimate" || isReady) ? "not-allowed" : "text",
+                  opacity: (kind === "estimate" || isReady) ? 0.7 : 1,
                 }}
               />
 
-              <div style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", opacity: qtyOnHand == null ? 0.7 : 1 }}>
-                {qtyOnHand == null ? "-" : qtyOnHand}
-              </div>
+              {showSensitive && (
+                <div style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", opacity: qtyOnHand == null ? 0.7 : 1 }}>
+                  {qtyOnHand == null ? "-" : qtyOnHand}
+                </div>
+              )}
 
+              {showSensitive && (
+                <>
               <input
                 type="number"
                 step="0.01"
                 defaultValue={usedDefault}
+                disabled={isReady}
                 onBlur={(e) => {
                   const v = num(e.currentTarget.value);
                   if (v !== usedDefault) patchItem(it.id, { qty_used: v });
@@ -490,17 +525,22 @@ export default function MaterialRequestDetailPage() {
                   padding: "8px 10px",
                   borderRadius: 10,
                   border: "1px solid rgba(255,255,255,0.12)",
-                  background: "rgba(17,24,39,0.65)",
+                  background: isReady ? "rgba(255,255,255,0.06)" : "rgba(17,24,39,0.65)",
                   color: "white",
                   outline: "none",
                   fontVariantNumeric: "tabular-nums",
+                  cursor: isReady ? "not-allowed" : "text",
+                  opacity: isReady ? 0.7 : 1,
                 }}
               />
 
               <div style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", opacity: stockChange == null ? 0.7 : 1 }}>
                 {stockChange == null ? "-" : stockChange}
               </div>
+                </>
+              )}
 
+              {showSensitive ? (
               <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8 }}>
                 <select
                   value={(it.prep_status || "PREPARING") as any}
@@ -542,7 +582,19 @@ export default function MaterialRequestDetailPage() {
                   style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.65)", color: "white", outline: "none" }}
                 />
               </div>
+              ) : (
+                <input
+                  defaultValue={it.note || ""}
+                  onBlur={(e) => {
+                    const v = e.currentTarget.value;
+                    if (v !== (it.note || "")) patchItem(it.id, { note: v });
+                  }}
+                  placeholder="비고"
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.65)", color: "white", outline: "none" }}
+                />
+              )}
 
+              {showSensitive && (
               <div style={{ display: "flex", justifyContent: "center" }}>
                 <button
                   onClick={() => (allowDelete && it.prep_status !== "READY") && deleteItem(it.id)}
@@ -560,6 +612,7 @@ export default function MaterialRequestDetailPage() {
                   삭제
                 </button>
               </div>
+              )}
             </div>
           );
         })}
@@ -721,7 +774,7 @@ export default function MaterialRequestDetailPage() {
           count={grouped.prod.length}
           right={<SmallBtn onClick={openProductModal}>추가</SmallBtn>}
         >
-          {renderEditableTable(grouped.prod, true, "uplink")}
+          {renderEditableTable(grouped.prod, canSeeSensitive, "uplink")}
         </SectionBox>
       )}
 
@@ -732,7 +785,7 @@ export default function MaterialRequestDetailPage() {
           count={grouped.man.length}
           right={<SmallBtn onClick={() => setManualDraft({ name: "", spec: "", unit: "EA", qty: 0, note: "" })}>추가</SmallBtn>}
         >
-          {renderEditableTable(grouped.man, true, "manual")}
+          {renderEditableTable(grouped.man, canSeeSensitive, "manual")}
         </SectionBox>
       )}
 
