@@ -203,9 +203,8 @@ export default function MaterialRequestDetailPage() {
           const h: any = (res as any)?.header ?? {};
           const rawMemo = (h?.memo ?? "") as string;
           const biz = (h?.business_name ?? "") as string;
-          // 기본값으로 사업명이 들어오는 경우(의도치 않은 프리필) 제거
-          const nextMemo = rawMemo?.trim() !== "" && rawMemo?.trim() === biz?.trim() ? "" : rawMemo;
-          setMrMemo(nextMemo);
+          // 기본값 프리필 제거 로직은 수동 자재요청 건명(memo) 보존을 위해 사용하지 않음
+          setMrMemo(rawMemo);
           memoInitRef.current = true;
         }
         setItems(Array.isArray((res as any)?.items) ? (res as any).items : []);
@@ -219,8 +218,26 @@ export default function MaterialRequestDetailPage() {
     reloadRef.current = fetchDetail;
     fetchDetail();
   }, [mrId]);
+  const title = String((header as any)?.business_name ?? (header as any)?.memo ?? '').trim() || `자재요청 #${mrId ?? ''}`;
 
-  const title =
+  const isManualMR = !((header as any)?.project_id) && !((header as any)?.estimate_id);
+  const statusUpper = ((header as any)?.status ?? "").toString().toUpperCase();
+  const isAlreadyDone = statusUpper === "DONE" || statusUpper === "COMPLETED" || statusUpper === "COMPLETE" || statusUpper === "FINISHED";
+  const isCanceled = statusUpper === "CANCELED" || statusUpper === "CANCELLED";
+
+  async function completeManualMR() {
+    if (!mrId) return;
+    if (!window.confirm("사업완료 처리하시겠습니까?")) return;
+    try {
+      await api(`/api/material-requests/${mrId}/complete`, { method: "POST", body: JSON.stringify({ confirm: true }) });
+      memoInitRef.current = false;
+      await reloadRef.current();
+      alert("사업완료 처리되었습니다.");
+    } catch (e: any) {
+      alert(e?.message || "사업완료 처리에 실패했습니다.");
+    }
+  }
+
     (header?.business_name && header.business_name.trim()) || (header?.memo && header.memo.trim()) || `자재요청 #${mrId}`;
 
   const grouped = useMemo(() => {
@@ -312,6 +329,10 @@ export default function MaterialRequestDetailPage() {
 
   async function saveMrMemo() {
     if (!mrId) return;
+    if (!mrMemo.trim()) {
+      alert("자재요청 건명을 넣으세요");
+      return;
+    }
     setMrMemoSaving(true);
     try {
       await api(`/api/material-requests/${mrId}`, {
@@ -843,7 +864,28 @@ export default function MaterialRequestDetailPage() {
         </div>
       )}
 
-      {/* 업링크 제품 선택 모달 */}
+      
+      {/* 수동 자재요청 단독 사업완료(프로젝트/견적서 미연동 건) */}
+      {!loading && isManualMR && !isAlreadyDone && !isCanceled && (
+        <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
+          <button
+            onClick={completeManualMR}
+            style={{
+              padding: "10px 14px",
+              borderRadius: 12,
+              border: "1px solid rgba(80,160,255,0.55)",
+              background: "rgba(37,99,235,0.30)",
+              color: "white",
+              fontWeight: 900,
+              cursor: "pointer",
+            }}
+          >
+            사업완료
+          </button>
+        </div>
+      )}
+
+{/* 업링크 제품 선택 모달 */}
       {productModalOpen && (
         <div
           onClick={() => setProductModalOpen(false)}

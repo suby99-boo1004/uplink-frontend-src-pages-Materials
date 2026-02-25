@@ -60,6 +60,21 @@ export default function MaterialRequestsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<MRRow[]>([]);
+
+  const sortedRows = useMemo(() => {
+    const arr = Array.isArray(rows) ? [...rows] : [];
+    arr.sort((a, b) => {
+      const ap = a?.is_pinned ? 1 : 0;
+      const bp = b?.is_pinned ? 1 : 0;
+      if (bp !== ap) return bp - ap; // pinned first
+      // 최신 우선(생성일/ID)
+      const at = a?.created_at ? Date.parse(a.created_at) : 0;
+      const bt = b?.created_at ? Date.parse(b.created_at) : 0;
+      if (bt !== at) return bt - at;
+      return (b?.id ?? 0) - (a?.id ?? 0);
+    });
+    return arr;
+  }, [rows]);
   const [isAdmin, setIsAdmin] = useState(false);
 
   const tabs = useMemo(
@@ -257,7 +272,7 @@ export default function MaterialRequestsPage() {
 
         {!loading && rows.length === 0 && <div style={{ padding: 14, opacity: 0.8 }}>표시할 데이터가 없습니다.</div>}
 
-        {rows.map((r) => {
+        {sortedRows.map((r) => {
           const title =
             (r.business_name && r.business_name.trim()) ||
             (r.project_name && r.project_name.trim()) ||
