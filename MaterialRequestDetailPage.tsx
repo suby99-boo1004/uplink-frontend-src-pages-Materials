@@ -406,17 +406,18 @@ export default function MaterialRequestDetailPage() {
   function renderEditableTable(list: MRItem[], allowDelete: boolean, kind: SectionKind) {
     const showSensitive = canSeeSensitive; // role.id 6(관리자),7(운영자)만 민감정보/조작 표시
     return (
-      <div style={{ borderRadius: 14, overflow: "hidden", border: "1px solid rgba(255,255,255,0.10)" }}>
+      <div style={{ width: "100%", borderRadius: 14, overflow: "hidden", border: "1px solid rgba(255,255,255,0.10)" }}>
         <div
           style={{
             display: "grid",
             gridTemplateColumns: showSensitive
-              ? "1.2fr 1fr 80px 110px 100px 130px 130px 220px 70px"
-              : "1.2fr 1fr 80px 110px 1fr",
+              ? "12% 19% 3% 7% 8% 7% 8% 8% 15% 5%"
+              : "12% 25% 3% 11% 40%",
             gap: 8,
             padding: "10px 12px",
             fontWeight: 900,
             opacity: 0.85,
+			textAlign: "left",
             background: "rgba(255,255,255,0.06)",
           }}
         >
@@ -429,9 +430,15 @@ export default function MaterialRequestDetailPage() {
           {showSensitive && <div style={{ textAlign: "right" }}>사용수량</div>}
           {showSensitive && <div style={{ textAlign: "right" }}>재고(잔량)</div>}
 
-          <div>{showSensitive ? "준비상황 / 비고" : "비고"}</div>
-
-          {showSensitive && <div style={{ textAlign: "center" }}>삭제</div>}
+          {showSensitive ? (
+            <>
+              <div style={{ textAlign: "center" }}>준비상황</div>
+              <div>비고</div>
+              <div style={{ textAlign: "center" }}>삭제</div>
+            </>
+          ) : (
+            <div>비고</div>
+          )}
         </div>
 
         {list.map((it) => {
@@ -446,8 +453,8 @@ export default function MaterialRequestDetailPage() {
             style={{
               display: "grid",
               gridTemplateColumns: showSensitive
-                ? "1.2fr 1fr 80px 110px 100px 130px 130px 220px 70px"
-                : "1.2fr 1fr 80px 110px 1fr",
+              ? "12% 20% 3% 7% 7% 7% 7% 9% 15% 5%"
+              : "12% 25% 5% 10% 40%",
               gap: 8,
               padding: "10px 12px",
               borderTop: "1px solid rgba(255,255,255,0.06)",
@@ -455,8 +462,8 @@ export default function MaterialRequestDetailPage() {
               opacity: ((it.prep_status || "").toUpperCase() === "READY" ? 0.75 : 1),
             }}
           >
-              <div style={{ fontWeight: 900 }}>{it.item_name_snapshot || "-"}</div>
-              <div style={{ opacity: 0.95 }}>{it.spec_snapshot || "-"}</div>
+              <div style={{ fontWeight: 900, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.item_name_snapshot || "-"}</div>
+              <div style={{ opacity: 0.95, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.spec_snapshot || "-"}</div>
               <div style={{ opacity: 0.95 }}>{it.unit_snapshot || "-"}</div>
 
               <input
@@ -541,47 +548,64 @@ export default function MaterialRequestDetailPage() {
               )}
 
               {showSensitive ? (
-              <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8 }}>
-                <select
-                  value={(it.prep_status || "PREPARING") as any}
-                  onChange={(e) => {
-                    const v = e.target.value;
+                <>
+                  <select
+                    value={(it.prep_status || "PREPARING") as any}
+                    onChange={(e) => {
+                      const v = e.target.value;
 
-                    // '준비완료'는 실수 방지를 위해 확인 팝업 후 처리
-                    if (v === "READY" && (v !== (it.prep_status || "PREPARING"))) {
-                      const ok = window.confirm(`준비완료 처리하시겠습니까?\n(요청수량: ${num(it.qty_requested)}, 사용수량: ${usedDefault})`);
-                      if (!ok) return; // 상태 변경 취소
-                    }
+                      // '준비완료'는 실수 방지를 위해 확인 팝업 후 처리
+                      if (v === "READY" && (v !== (it.prep_status || "PREPARING"))) {
+                        const ok = window.confirm(`준비완료 처리하시겠습니까?\n(요청수량: ${num(it.qty_requested)}, 사용수량: ${usedDefault})`);
+                        if (!ok) return; // 상태 변경 취소
+                      }
 
-                    if (v !== (it.prep_status || "PREPARING")) patchItem(it.id, { prep_status: v });
-                  }}
-                  style={{
-                    width: 120,
-                    padding: "8px 10px",
-                    borderRadius: 10,
-                    border: "1px solid rgba(255,255,255,0.12)",
-                    background: "rgba(17,24,39,0.65)",
-                    color: "white",
-                    outline: "none",
-                    fontWeight: 900,
-                    flex: "0 0 auto",
-                  }}
-                >
-                  <option value="PREPARING">준비중</option>
-                  <option value="CHANGED">수량변경</option>
-                  <option value="READY">준비완료</option>
-                </select>
+                      if (v !== (it.prep_status || "PREPARING")) patchItem(it.id, { prep_status: v });
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      background: "rgba(17,24,39,0.65)",
+                      color: "white",
+                      outline: "none",
+                      fontWeight: 900,
+                    }}
+                  >
+                    <option value="PREPARING">준비중</option>
+                    <option value="CHANGED">수량변경</option>
+                    <option value="READY">준비완료</option>
+                  </select>
 
-                <input
-                  defaultValue={it.note || ""}
-                  onBlur={(e) => {
-                    const v = e.currentTarget.value;
-                    if (v !== (it.note || "")) patchItem(it.id, { note: v });
-                  }}
-                  placeholder="비고"
-                  style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.65)", color: "white", outline: "none" }}
-                />
-              </div>
+                  <input
+                    defaultValue={it.note || ""}
+                    onBlur={(e) => {
+                      const v = e.currentTarget.value;
+                      if (v !== (it.note || "")) patchItem(it.id, { note: v });
+                    }}
+                    placeholder="비고"
+                    style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.65)", color: "white", outline: "none" }}
+                  />
+
+                  <div style={{ display: "flex", justifyContent: "center" }}>
+                    <button
+                      onClick={() => (allowDelete && it.prep_status !== "READY") && deleteItem(it.id)}
+                      disabled={!(allowDelete && it.prep_status !== "READY")}
+                      style={{
+                        padding: "8px 10px",
+                        borderRadius: 10,
+                        border: "1px solid rgba(255,255,255,0.15)",
+                        background: (allowDelete && it.prep_status !== "READY") ? "rgba(255,80,80,0.18)" : "rgba(255,255,255,0.04)",
+                        color: "white",
+                        cursor: (allowDelete && it.prep_status !== "READY") ? "pointer" : "not-allowed",
+                        fontWeight: 900,
+                      }}
+                    >
+                      삭제
+                    </button>
+                  </div>
+                </>
               ) : (
                 <input
                   defaultValue={it.note || ""}
@@ -592,26 +616,6 @@ export default function MaterialRequestDetailPage() {
                   placeholder="비고"
                   style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.65)", color: "white", outline: "none" }}
                 />
-              )}
-
-              {showSensitive && (
-              <div style={{ display: "flex", justifyContent: "center" }}>
-                <button
-                  onClick={() => (allowDelete && it.prep_status !== "READY") && deleteItem(it.id)}
-                  disabled={!(allowDelete && it.prep_status !== "READY")}
-                  style={{
-                    padding: "8px 10px",
-                    borderRadius: 10,
-                    border: "1px solid rgba(255,255,255,0.15)",
-                    background: (allowDelete && it.prep_status !== "READY") ? "rgba(255,80,80,0.18)" : "rgba(255,255,255,0.04)",
-                    color: "white",
-                    cursor: (allowDelete && it.prep_status !== "READY") ? "pointer" : "not-allowed",
-                    fontWeight: 900,
-                  }}
-                >
-                  삭제
-                </button>
-              </div>
               )}
             </div>
           );
@@ -627,10 +631,8 @@ export default function MaterialRequestDetailPage() {
     <div style={{ padding: 18, color: "white" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <div>
-          <div style={{ fontSize: 22, fontWeight: 950 }}>{title}</div>
-          <div style={{ opacity: 0.85, marginTop: 4, fontSize: 13 }}>
-            등록자: {header?.requested_by_name || "-"} · 등록일: {fmtDateTime(header?.created_at || null)} · 상태: {header?.status || "-"}
-          </div>
+          <div style={{ fontSize: 22, fontWeight: 950 }}>자재요청 사업명 : {title}</div>
+          
         </div>
 
         <button
@@ -651,10 +653,18 @@ export default function MaterialRequestDetailPage() {
       {/* 추가/수정 영역 */}
       <div style={{ marginTop: 14, padding: 12, borderRadius: 16, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(0,0,0,0.22)" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <div>
-            <div style={{ fontWeight: 950 }}>추가 / 수정</div>
-            <div style={{ opacity: 0.85, fontSize: 13, marginTop: 4 }}>업링크 제품 추가 / 수동 추가 / 요청수량·준비상황·비고 수정</div>
-          </div>
+          
+		  <div style={{ 
+  marginTop: 4, 
+  fontSize: 20,
+  display: "flex",
+  gap: 50
+}}>
+  <div>등록자: {header?.requested_by_name || "-"},</div>
+  <div>등록일: {fmtDateTime(header?.created_at || null)}</div>
+</div>
+		  
+		  
 
           <div style={{ display: "flex", gap: 8 }}>
   <button
