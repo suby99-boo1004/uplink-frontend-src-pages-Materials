@@ -2,6 +2,27 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../../lib/api";
 
+// 화면 블랙스크린 방지용 ErrorBoundary(상세 페이지)
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; message?: string }>{
+  constructor(props: any){ super(props); this.state = { hasError: false }; }
+  static getDerivedStateFromError(err: any){ return { hasError: true, message: err?.message || String(err) }; }
+  componentDidCatch(err: any){ console.error(err); }
+  render(){
+    if(this.state.hasError){
+      return (
+        <div style={{ padding: 18, color: 'white' }}>
+          <div style={{ padding: 12, borderRadius: 12, border: '1px solid rgba(255,80,80,0.45)', background: 'rgba(255,80,80,0.10)' }}>
+            <div style={{ fontWeight: 950, marginBottom: 6 }}>화면 렌더링 오류</div>
+            <div style={{ whiteSpace: 'pre-wrap', opacity: 0.9, fontSize: 13 }}>{this.state.message}</div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children as any;
+  }
+}
+
+
 type MRHeader = {
   id: number;
   memo?: string | null;
@@ -14,14 +35,12 @@ type MRHeader = {
 
 type MRItem = {
   id: number;
-  source?: string | null; // FROM_ESTIMATE / FROM_PRODUCT / MANUAL_TEXT ...
+  source?: string | null; // ESTIMATE / PRODUCT / MANUAL (서버 표준, 호환)
   estimate_item_id?: number | null;
   product_id?: number | null;
-
   item_name_snapshot: string;
   spec_snapshot: string;
   unit_snapshot: string;
-
   qty_requested: number;
   qty_used?: number | null;
   qty_on_hand?: number | null;
@@ -56,13 +75,21 @@ function fmtDateTime(s?: string | null) {
 
 function sourceKey(it: MRItem): "ESTIMATE" | "PRODUCT" | "MANUAL" {
   const s = (it.source || "").toUpperCase();
-  if (s.includes("ESTIMATE")) return "ESTIMATE";
-  if (s.includes("PRODUCT") || s.includes("UPLINK")) return "PRODUCT";
-  if (s.includes("MANUAL") || s.includes("TEXT")) return "MANUAL";
+  const pid = typeof it.product_id === "number" ? it.product_id : null;
+  const eid = typeof it.estimate_item_id === "number" ? it.estimate_item_id : null;
 
-  // fallback
-  if (typeof it.estimate_item_id === "number" && it.estimate_item_id > 0) return "ESTIMATE";
-  if (typeof it.product_id === "number" && it.product_id > 0) return "PRODUCT";
+  // 0) 둘 다 없으면 수동
+  if ((!pid || pid <= 0) && (!eid || eid <= 0)) return "MANUAL";
+
+  // 1) 견적서 우선 (FROM_ESTIMATE 포함). product_id가 같이 있어도 견적서 섹션으로
+  if (eid && eid > 0) return "ESTIMATE";
+  if (s.includes("ESTIMATE") || s.includes("FROM_ESTIMATE") || s.includes("FROM_QUOTE") || s.includes("QUOTE") || s === "EST") return "ESTIMATE";
+
+  // 2) 업링크 제품(자재) — product_id가 있을 때만
+  if (pid && pid > 0) return "PRODUCT";
+  if (s.includes("PRODUCT") || s.includes("UPLINK") || s.includes("MATERIAL") || s.includes("STOCK") || s.includes("ITEM") || s.includes("GOODS")) return "PRODUCT";
+
+  // 3) 나머지는 수동
   return "MANUAL";
 }
 
@@ -81,48 +108,22 @@ function SectionBox({
   right?: React.ReactNode;
   children: React.ReactNode;
 }) {
-  const styleMap: Record<SectionKind, { border: string; bg: string; badgeBg: string; badgeBorder: string }> = {
-    estimate: {
-      border: "rgba(80,160,255,0.50)",
-      bg: "rgba(80,160,255,0.10)",
-      badgeBg: "rgba(80,160,255,0.18)",
-      badgeBorder: "rgba(80,160,255,0.50)",
-    },
-    uplink: {
-      border: "rgba(80,220,160,0.50)",
-      bg: "rgba(80,220,160,0.10)",
-      badgeBg: "rgba(80,220,160,0.18)",
-      badgeBorder: "rgba(80,220,160,0.50)",
-    },
-    manual: {
-      border: "rgba(255,180,80,0.50)",
-      bg: "rgba(255,180,80,0.10)",
-      badgeBg: "rgba(255,180,80,0.18)",
-      badgeBorder: "rgba(255,180,80,0.50)",
-    },
+  const styleMap: Record<SectionKind, any> = {
+    estimate: { border: "rgba(80,160,255,0.50)", bg: "rgba(80,160,255,0.10)", badgeBorder: "rgba(80,160,255,0.55)" },
+    uplink: { border: "rgba(80,220,160,0.50)", bg: "rgba(80,220,160,0.10)", badgeBorder: "rgba(80,220,160,0.55)" },
+    manual: { border: "rgba(255,180,80,0.50)", bg: "rgba(255,180,80,0.10)", badgeBorder: "rgba(255,180,80,0.55)" },
   };
   const s = styleMap[kind];
-
   return (
-    <div style={{ marginTop: 14, borderRadius: 16, border: `2px solid ${s.border}`, background: s.bg, padding: 12 }}>
+    <div style={{ marginTop: 12, borderRadius: 16, border: `1px solid ${s.border}`, background: s.bg, padding: 12 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-          <div style={{ fontWeight: 900, whiteSpace: "nowrap" }}>{title}</div>
-          <div
-            style={{
-              border: `1px solid ${s.badgeBorder}`,
-              background: s.badgeBg,
-              padding: "4px 10px",
-              borderRadius: 999,
-              fontSize: 12,
-              fontWeight: 900,
-              fontVariantNumeric: "tabular-nums",
-            }}
-          >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ fontWeight: 950 }}>{title}</div>
+          <div style={{ padding: "4px 8px", borderRadius: 999, border: `1px solid ${s.badgeBorder}`, background: "rgba(0,0,0,0.18)", fontWeight: 900, fontSize: 12 }}>
             {count}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>{right}</div>
+        {right}
       </div>
       <div style={{ marginTop: 10 }}>{children}</div>
     </div>
@@ -132,18 +133,16 @@ function SectionBox({
 function SmallBtn({ children, onClick, disabled }: { children: React.ReactNode; onClick: () => void; disabled?: boolean }) {
   return (
     <button
-      type="button"
       onClick={onClick}
-      disabled={!!disabled}
+      disabled={disabled}
       style={{
-        padding: "8px 10px",
+        padding: "10px 12px",
         borderRadius: 10,
         border: "1px solid rgba(255,255,255,0.15)",
-        background: disabled ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.08)",
+        background: disabled ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.08)",
         color: "white",
         cursor: disabled ? "not-allowed" : "pointer",
         fontWeight: 900,
-        whiteSpace: "nowrap",
       }}
     >
       {children}
@@ -169,6 +168,11 @@ export default function MaterialRequestDetailPage() {
   const [header, setHeader] = useState<MRHeader | null>(null);
   const [items, setItems] = useState<MRItem[]>([]);
 
+  // 자재요청 참고사항(헤더 메모)
+  const [mrMemo, setMrMemo] = useState<string>("");
+  const [mrMemoSaving, setMrMemoSaving] = useState(false);
+  const memoInitRef = useRef(false);
+
   // 업링크 제품 모달
   const [productModalOpen, setProductModalOpen] = useState(false);
   const [productKeyword, setProductKeyword] = useState("");
@@ -187,13 +191,24 @@ export default function MaterialRequestDetailPage() {
         setError("잘못된 자재요청 ID 입니다.");
         return;
       }
+
       setLoading(true);
       setError(null);
+
       try {
-        const res = await api<DetailRes>(`/api/material-requests/${mrId}`);
-        setCanSeeSensitive(!!res?.can_see_sensitive);
-        setHeader(res?.header ?? null);
-        setItems(Array.isArray(res?.items) ? res.items : []);
+        const res = (await api(`/api/material-requests/${mrId}`)) as DetailRes;
+        setCanSeeSensitive(!!(res as any)?.can_see_sensitive);
+        setHeader((res as any)?.header ?? null);
+        if (!memoInitRef.current) {
+          const h: any = (res as any)?.header ?? {};
+          const rawMemo = (h?.memo ?? "") as string;
+          const biz = (h?.business_name ?? "") as string;
+          // 기본값으로 사업명이 들어오는 경우(의도치 않은 프리필) 제거
+          const nextMemo = rawMemo?.trim() !== "" && rawMemo?.trim() === biz?.trim() ? "" : rawMemo;
+          setMrMemo(nextMemo);
+          memoInitRef.current = true;
+        }
+        setItems(Array.isArray((res as any)?.items) ? (res as any).items : []);
       } catch (e: any) {
         setError(e?.message || "상세를 불러오지 못했습니다.");
       } finally {
@@ -205,23 +220,27 @@ export default function MaterialRequestDetailPage() {
     fetchDetail();
   }, [mrId]);
 
-  const title = (header?.business_name && header.business_name.trim()) || (header?.memo && header.memo.trim()) || `자재요청 #${mrId}`;
+  const title =
+    (header?.business_name && header.business_name.trim()) || (header?.memo && header.memo.trim()) || `자재요청 #${mrId}`;
 
   const grouped = useMemo(() => {
     const est: MRItem[] = [];
     const prod: MRItem[] = [];
     const man: MRItem[] = [];
+
     for (const it of items) {
       const k = sourceKey(it);
       if (k === "ESTIMATE") est.push(it);
       else if (k === "PRODUCT") prod.push(it);
       else man.push(it);
     }
+
     return { est, prod, man };
   }, [items]);
 
   async function patchItem(itemId: number, patch: Partial<MRItem>) {
     setSavingId(itemId);
+
     try {
       await api(`/api/material-requests/items/${itemId}`, {
         method: "PATCH",
@@ -233,8 +252,15 @@ export default function MaterialRequestDetailPage() {
           note: patch.note,
         }),
       });
+
       // UI 즉시 반영
       setItems((prev) => prev.map((x) => (x.id === itemId ? { ...x, ...patch } : x)));
+
+      // ✅ 재고/현재수량이 다른 라인에도 영향을 주는 변경(READY/CHANGED/qty_used)은 서버 재조회로 동기화
+      const needReload = patch.qty_used !== undefined || patch.prep_status === "READY" || patch.prep_status === "CHANGED";
+      if (needReload) {
+        await reloadRef.current();
+      }
     } catch (e: any) {
       alert(e?.message || "저장에 실패했습니다.");
     } finally {
@@ -253,11 +279,20 @@ export default function MaterialRequestDetailPage() {
     source: string;
   }) {
     try {
+      // ✅ 안전: unit/qty 보정(백엔드가 unit 빈 값이면 에러 나는 케이스 방지)
+      const unit = (payload.unit_snapshot || "EA").toString().trim() || "EA";
+      const qty = Number.isFinite(Number(payload.qty_requested)) ? Number(payload.qty_requested) : 0;
+
       await api(`/api/material-requests/${mrId}/items`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          unit_snapshot: unit,
+          qty_requested: qty < 0 ? 0 : qty,
+        }),
       });
+
       await reloadRef.current();
     } catch (e: any) {
       alert(e?.message || "추가에 실패했습니다.");
@@ -266,6 +301,7 @@ export default function MaterialRequestDetailPage() {
 
   async function deleteItem(itemId: number) {
     if (!confirm("해당 항목을 삭제할까요?")) return;
+
     try {
       await api(`/api/material-requests/items/${itemId}`, { method: "DELETE" });
       await reloadRef.current();
@@ -274,25 +310,40 @@ export default function MaterialRequestDetailPage() {
     }
   }
 
+  async function saveMrMemo() {
+    if (!mrId) return;
+    setMrMemoSaving(true);
+    try {
+      await api(`/api/material-requests/${mrId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ memo: mrMemo }),
+      });
+      // 저장 후 최신값 반영
+      memoInitRef.current = false;
+      await reloadRef.current();
+      alert("참고사항이 저장되었습니다.");
+    } catch (e: any) {
+      alert(e?.message || "참고사항 저장에 실패했습니다.");
+    } finally {
+      setMrMemoSaving(false);
+    }
+  }
+
+
   async function loadProducts(keywordOverride?: string) {
     const kw = (keywordOverride ?? productKeyword).trim();
-
     setProductLoading(true);
     setProductError(null);
 
     try {
-      const tryUrls = [
-        `/api/products?keyword=${encodeURIComponent(kw)}`,
-        `/api/products?q=${encodeURIComponent(kw)}`,
-        `/api/products`,
-      ];
-
+      const tryUrls = [`/api/products?keyword=${encodeURIComponent(kw)}`, `/api/products?q=${encodeURIComponent(kw)}`, `/api/products`];
       let res: any = null;
       let lastErr: any = null;
 
       for (const url of tryUrls) {
         try {
-          res = await api<any>(url);
+          res = await api(url);
           lastErr = null;
           break;
         } catch (e) {
@@ -337,232 +388,265 @@ export default function MaterialRequestDetailPage() {
   }, [productKeyword, productModalOpen]);
 
   function addUplinkProductAndClose(p: ProductRow) {
-    // 한 번에 1개만 추가(신규등록과 동일한 UX)
+    // ✅ 한 번에 1개만 추가(신규등록과 동일한 UX)
     addItem({
-      source: "UPLINK_PRODUCT",
+      source: "PRODUCT", // 서버 표준
       product_id: p.id,
       estimate_item_id: null,
       item_name_snapshot: p.name,
       spec_snapshot: (p.spec ?? "").toString(),
-      unit_snapshot: (p.unit ?? "EA").toString(),
+      unit_snapshot: (p.unit ?? "EA").toString() || "EA",
       qty_requested: 1,
       note: "",
     });
+
     setProductModalOpen(false);
   }
 
-  function renderEditableTable(list: MRItem[], allowDelete: boolean) {
+  function renderEditableTable(list: MRItem[], allowDelete: boolean, kind: SectionKind) {
     return (
-      <div style={{ marginTop: 10, borderRadius: 14, overflow: "hidden", border: "1px solid rgba(255,255,255,0.10)" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
-          <thead>
-            <tr style={{ background: "rgba(255,255,255,0.05)" }}>
-              <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85 }}>자재명</th>
-              <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85 }}>규격</th>
-              <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85, width: 60 }}>단위</th>
-              <th style={{ textAlign: "right", padding: 10, fontSize: 12, opacity: 0.85, width: 80 }}>요청수량</th>
-              <th style={{ textAlign: "right", padding: 10, fontSize: 12, opacity: 0.85, width: 80 }}>현재수량</th>
-              <th style={{ textAlign: "right", padding: 10, fontSize: 12, opacity: 0.85, width: 80, display: canSeeSensitive ? undefined : "none" }}>사용수량</th>
-              <th style={{ textAlign: "right", padding: 10, fontSize: 12, opacity: 0.85, width: 110, display: canSeeSensitive ? undefined : "none" }}>재고변경수량</th>
-              <th style={{ textAlign: "left", padding: 10, fontSize: 12, opacity: 0.85, width: 210 }}>준비상황 / 비고</th>
-              <th style={{ textAlign: "center", padding: 10, fontSize: 12, opacity: 0.85, width: 62 }}>삭제</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.map((it) => (
-              <tr key={it.id} style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-                <td style={{ padding: 10, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={it.item_name_snapshot || "-"}>{it.item_name_snapshot || "-"}</td>
-                <td style={{ padding: 10, opacity: 0.95, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={it.spec_snapshot || "-"}>{it.spec_snapshot || "-"}</td>
-                <td style={{ padding: 10, opacity: 0.95, width: 60, whiteSpace: "nowrap" }}>{it.unit_snapshot || "-"}</td>
+      <div style={{ borderRadius: 14, overflow: "hidden", border: "1px solid rgba(255,255,255,0.10)" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 80px 110px 100px 130px 130px 220px 70px", gap: 8, padding: "10px 12px", fontWeight: 900, opacity: 0.85, background: "rgba(255,255,255,0.06)" }}>
+          <div>자재명</div>
+          <div>규격</div>
+          <div>단위</div>
+          <div style={{ textAlign: "right" }}>요청수량</div>
+          <div style={{ textAlign: "right" }}>현재수량</div>
+          <div style={{ textAlign: "right" }}>사용수량</div>
+          <div style={{ textAlign: "right" }}>재고(잔량) </div>
+          <div>준비상황 / 비고</div>
+          <div style={{ textAlign: "center" }}>삭제</div>
+        </div>
 
-                <td style={{ padding: 10, textAlign: "right", width: 80 }}>
-                  <input
-                    defaultValue={String(num(it.qty_requested))}
-                    onBlur={(e) => {
-                      const v = num(e.currentTarget.value);
-                      if (v !== num(it.qty_requested)) patchItem(it.id, { qty_requested: v });
-                    }}
-                    style={{
-                      width: "100%",
-                      textAlign: "right",
-                      padding: "8px 10px",
-                      borderRadius: 10,
-                      border: "1px solid rgba(255,255,255,0.12)",
-                      background: "rgba(17,24,39,0.65)",
-                      color: "white",
-                      outline: "none",
-                      fontVariantNumeric: "tabular-nums",
-                    }}
-                  />
-                </td>
+        {list.map((it) => {
+          const qtyOnHand = it.qty_on_hand == null ? null : num(it.qty_on_hand);
+          const usedDefault = it.qty_used == null || (num(it.qty_used) === 0 && num(it.qty_requested) > 0) ? num(it.qty_requested) : num(it.qty_used);
+          const stockChange = qtyOnHand == null ? null : qtyOnHand - usedDefault;
 
-                <td style={{ padding: 10, textAlign: "right", opacity: 0.95 }}>
-                  {it.qty_on_hand == null ? (it.product_id ? 0 : "-") : num(it.qty_on_hand)}
-                </td>
+          return (
+            <div key={it.id} style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 80px 110px 100px 130px 130px 220px 70px", gap: 8, padding: "10px 12px", borderTop: "1px solid rgba(255,255,255,0.06)", background: ((it.prep_status || '').toUpperCase() === 'READY' ? 'rgba(255,255,255,0.06)' : 'transparent'), opacity: ((it.prep_status || '').toUpperCase() === 'READY' ? 0.75 : 1) }}>
+              <div style={{ fontWeight: 900 }}>{it.item_name_snapshot || "-"}</div>
+              <div style={{ opacity: 0.95 }}>{it.spec_snapshot || "-"}</div>
+              <div style={{ opacity: 0.95 }}>{it.unit_snapshot || "-"}</div>
 
-                <td style={{ padding: 10, display: canSeeSensitive ? undefined : "none" }}>
-                  <input
-                    defaultValue={String((it.qty_used == null || (num(it.qty_used) === 0 && num(it.qty_requested) > 0)) ? num(it.qty_requested) : num(it.qty_used))}
-                    onBlur={(e) => {
-                      const v = num(e.currentTarget.value);
-                      if (v !== (it.qty_used == null || (num(it.qty_used) === 0 && num(it.qty_requested) > 0)) ? num(it.qty_requested) : num(it.qty_used)) patchItem(it.id, { qty_used: v });
-                    }}
-                    style={{
-                      width: "100%",
-                      textAlign: "right",
-                      padding: "8px 10px",
-                      borderRadius: 10,
-                      border: "1px solid rgba(255,255,255,0.12)",
-                      background: "rgba(17,24,39,0.65)",
-                      color: "white",
-                      outline: "none",
-                      fontVariantNumeric: "tabular-nums",
-                    }}
-                  />
-                </td>
+              <input
+                defaultValue={num(it.qty_requested)}
+                disabled={kind === "estimate"}
+                onBlur={(e) => {
+                  const v = num(e.currentTarget.value);
+                  const prev = num(it.qty_requested);
 
-                <td style={{ padding: 10, textAlign: "right", fontVariantNumeric: "tabular-nums", display: canSeeSensitive ? undefined : "none" }}>
-                  {it.qty_on_hand == null ? (it.product_id ? 0 - num(it.qty_used ?? it.qty_requested) : "-") : num(it.qty_on_hand) - num(it.qty_used ?? it.qty_requested)}
-                </td>
+                  if (v === prev) return;
 
-                <td style={{ padding: 10 }}>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <select
-                      defaultValue={(it.prep_status || "PREPARING") as any}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        if (v !== (it.prep_status || "PREPARING")) patchItem(it.id, { prep_status: v });
-                      }}
-                      style={{
-                        width: 110,
-                        padding: "8px 10px",
-                        borderRadius: 10,
-                        border: "1px solid rgba(255,255,255,0.12)",
-                        background: "rgba(17,24,39,0.65)",
-                        color: "white",
-                        outline: "none",
-                        fontWeight: 900,
-                        flex: "0 0 auto",
-                      }}
-                    >
-                      <option value="PREPARING">준비중</option>
-                      <option value="READY">준비완료</option>
-                    </select>
+                  // 견적서 재료비(estimate)는 요청수량 변경 불가 (UI 안전장치)
+                  if (kind === "estimate") {
+                    e.currentTarget.value = String(prev);
+                    return;
+                  }
 
-                    <input
-                      defaultValue={it.note || ""}
-                      onBlur={(e) => {
-                        const v = e.currentTarget.value;
-                        if (v !== (it.note || "")) patchItem(it.id, { note: v });
-                      }}
-                      placeholder="비고"
-                      style={{
-                        width: "100%",
-                        padding: "8px 10px",
-                        borderRadius: 10,
-                        border: "1px solid rgba(255,255,255,0.12)",
-                        background: "rgba(17,24,39,0.65)",
-                        color: "white",
-                        outline: "none",
-                      }}
-                    />
-                  </div>
-                </td>
+                  // 업링크 제품/수동추가 수량 변경 시 재확인
+                  if (kind === "uplink" || kind === "manual") {
+                    const ok = window.confirm("변경하시겠습니까?");
+                    if (!ok) {
+                      e.currentTarget.value = String(prev);
+                      return;
+                    }
+                    patchItem(it.id, { qty_requested: v, prep_status: "CHANGED" });
+                    return;
+                  }
 
-                <td style={{ padding: 10, textAlign: "center", width: 62 }}>
-                  <button
-                    type="button"
-                    disabled={!allowDelete}
-                    onClick={() => deleteItem(it.id)}
-                    style={{
-                      padding: "8px 10px",
-                      borderRadius: 10,
-                      border: "1px solid rgba(255,255,255,0.15)",
-                      background: allowDelete ? "rgba(255,80,80,0.18)" : "rgba(255,255,255,0.04)",
-                      color: "white",
-                      cursor: allowDelete ? "pointer" : "not-allowed",
-                      fontWeight: 900,
-                    }}
-                  >
-                    삭제
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  patchItem(it.id, { qty_requested: v, prep_status: "CHANGED" });
+                }}
+                style={{
+                  width: "100%",
+                  textAlign: "right",
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  background: kind === "estimate" ? "rgba(255,255,255,0.06)" : "rgba(17,24,39,0.65)",
+                  color: "white",
+                  outline: "none",
+                  fontVariantNumeric: "tabular-nums",
+                  cursor: kind === "estimate" ? "not-allowed" : "text",
+                  opacity: kind === "estimate" ? 0.7 : 1,
+                }}
+              />
 
-        {savingId !== null && (
-          <div style={{ padding: 10, fontSize: 12, opacity: 0.75, borderTop: "1px solid rgba(255,255,255,0.06)" }}>저장 중…</div>
-        )}
+              <div style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", opacity: qtyOnHand == null ? 0.7 : 1 }}>
+                {qtyOnHand == null ? "-" : qtyOnHand}
+              </div>
+
+              <input
+                type="number"
+                step="0.01"
+                defaultValue={usedDefault}
+                onBlur={(e) => {
+                  const v = num(e.currentTarget.value);
+                  if (v !== usedDefault) patchItem(it.id, { qty_used: v });
+                }}
+                style={{
+                  width: "100%",
+                  textAlign: "right",
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  background: "rgba(17,24,39,0.65)",
+                  color: "white",
+                  outline: "none",
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              />
+
+              <div style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", opacity: stockChange == null ? 0.7 : 1 }}>
+                {stockChange == null ? "-" : stockChange}
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8 }}>
+                <select
+                  value={(it.prep_status || "PREPARING") as any}
+                  onChange={(e) => {
+                    const v = e.target.value;
+
+                    // '준비완료'는 실수 방지를 위해 확인 팝업 후 처리
+                    if (v === "READY" && (v !== (it.prep_status || "PREPARING"))) {
+                      const ok = window.confirm(`준비완료 처리하시겠습니까?\n(요청수량: ${num(it.qty_requested)}, 사용수량: ${usedDefault})`);
+                      if (!ok) return; // 상태 변경 취소
+                    }
+
+                    if (v !== (it.prep_status || "PREPARING")) patchItem(it.id, { prep_status: v });
+                  }}
+                  style={{
+                    width: 120,
+                    padding: "8px 10px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    background: "rgba(17,24,39,0.65)",
+                    color: "white",
+                    outline: "none",
+                    fontWeight: 900,
+                    flex: "0 0 auto",
+                  }}
+                >
+                  <option value="PREPARING">준비중</option>
+                  <option value="CHANGED">수량변경</option>
+                  <option value="READY">준비완료</option>
+                </select>
+
+                <input
+                  defaultValue={it.note || ""}
+                  onBlur={(e) => {
+                    const v = e.currentTarget.value;
+                    if (v !== (it.note || "")) patchItem(it.id, { note: v });
+                  }}
+                  placeholder="비고"
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.65)", color: "white", outline: "none" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "center" }}>
+                <button
+                  onClick={() => (allowDelete && it.prep_status !== "READY") && deleteItem(it.id)}
+                  disabled={!(allowDelete && it.prep_status !== "READY")}
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(255,255,255,0.15)",
+                    background: (allowDelete && it.prep_status !== "READY") ? "rgba(255,80,80,0.18)" : "rgba(255,255,255,0.04)",
+                    color: "white",
+                    cursor: (allowDelete && it.prep_status !== "READY") ? "pointer" : "not-allowed",
+                    fontWeight: 900,
+                  }}
+                >
+                  삭제
+                </button>
+              </div>
+            </div>
+          );
+        })}
+
+        {savingId !== null && <div style={{ padding: 10, opacity: 0.85, fontWeight: 900 }}>저장 중…</div>}
       </div>
     );
   }
 
   return (
-    <div style={{ padding: 20 }}>
+    <ErrorBoundary>
+    <div style={{ padding: 18, color: "white" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <div>
-          <div style={{ fontSize: 18, fontWeight: 900 }}>{title}</div>
-          <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
+          <div style={{ fontSize: 22, fontWeight: 950 }}>{title}</div>
+          <div style={{ opacity: 0.85, marginTop: 4, fontSize: 13 }}>
             등록자: {header?.requested_by_name || "-"} · 등록일: {fmtDateTime(header?.created_at || null)} · 상태: {header?.status || "-"}
           </div>
         </div>
 
         <button
-          type="button"
           onClick={() => navigate("/materials")}
-          style={{
-            padding: "10px 12px",
-            borderRadius: 10,
-            border: "1px solid rgba(255,255,255,0.15)",
-            background: "rgba(255,255,255,0.06)",
-            color: "white",
-            cursor: "pointer",
-            fontWeight: 900,
-          }}
+          style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "white", cursor: "pointer", fontWeight: 900 }}
         >
           목록으로
         </button>
       </div>
 
       {error && (
-        <div style={{ marginTop: 14, padding: 12, borderRadius: 12, border: "1px solid rgba(255,80,80,0.35)", background: "rgba(255,80,80,0.10)" }}>
-          <div style={{ fontWeight: 900, marginBottom: 6 }}>불러오기 실패</div>
-          <div style={{ opacity: 0.9 }}>{error}</div>
+        <div style={{ marginTop: 14, padding: 12, borderRadius: 12, border: "1px solid rgba(255,80,80,0.45)", background: "rgba(255,80,80,0.10)" }}>
+          <div style={{ fontWeight: 950 }}>불러오기 실패</div>
+          <div style={{ opacity: 0.9, marginTop: 4 }}>{error}</div>
         </div>
       )}
 
-      {/* 추가/수정 영역(신규등록 스타일) */}
-      <div style={{ marginTop: 14, padding: 12, borderRadius: 14, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+      {/* 추가/수정 영역 */}
+      <div style={{ marginTop: 14, padding: 12, borderRadius: 16, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(0,0,0,0.22)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
           <div>
-            <div style={{ fontWeight: 900 }}>추가 / 수정</div>
-            <div style={{ marginTop: 4, fontSize: 12, opacity: 0.75 }}>업링크 제품 추가 / 수동 추가 / 요청수량·준비상황·비고 수정</div>
+            <div style={{ fontWeight: 950 }}>추가 / 수정</div>
+            <div style={{ opacity: 0.85, fontSize: 13, marginTop: 4 }}>업링크 제품 추가 / 수동 추가 / 요청수량·준비상황·비고 수정</div>
           </div>
 
           <div style={{ display: "flex", gap: 8 }}>
-            <SmallBtn onClick={openProductModal}>업링크 제품 추가</SmallBtn>
-            <SmallBtn
-              onClick={() =>
-                setManualDraft({
-                  name: "",
-                  spec: "",
-                  unit: "",
-                  qty: 0,
-                  note: "",
-                })
-              }
-            >
-              수동 추가
-            </SmallBtn>
-          </div>
+  <button
+    type="button"
+    onClick={openProductModal}
+    style={{
+      background: "linear-gradient(180deg, #2563EB 0%, #1D4ED8 100%)",
+      color: "#fff",
+      border: "1px solid #1d4ed8",
+      padding: "10px 12px",
+      borderRadius: 10,
+      cursor: "pointer",
+      fontSize: 15,
+      fontWeight: 900,
+    }}
+  >
+    업링크 제품 추가
+  </button>
+
+  <button
+    type="button"
+    onClick={() => setManualDraft({ name: "", spec: "", unit: "EA", qty: 0, note: "" })}
+    style={{
+      background: "linear-gradient(180deg, #2563EB 0%, #1D4ED8 100%)",
+      color: "#fff",
+      border: "1px solid #1d4ed8",
+      padding: "10px 12px",
+      borderRadius: 10,
+      cursor: "pointer",
+      fontSize: 15,
+      fontWeight: 900,
+    }}
+  >
+    수동 추가
+  </button>
+  
+</div>
+		  
         </div>
 
         {manualDraft && (
-          <div style={{ marginTop: 12, borderRadius: 14, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.55)", padding: 12 }}>
-            <div style={{ fontWeight: 900, marginBottom: 10 }}>수동 자재 추가</div>
-            <div style={{ display: "grid", gridTemplateColumns: "2fr 2fr 1fr 1fr", gap: 10 }}>
+          <div style={{ marginTop: 12, padding: 12, borderRadius: 14, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(0,0,0,0.18)" }}>
+            <div style={{ fontWeight: 950 }}>수동 자재 추가</div>
+
+            <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1.2fr 1fr 90px 120px 1.2fr 120px", gap: 8 }}>
               <input
                 value={manualDraft.name}
                 onChange={(e) => setManualDraft((p) => (p ? { ...p, name: e.target.value } : p))}
@@ -578,92 +662,121 @@ export default function MaterialRequestDetailPage() {
               <input
                 value={manualDraft.unit}
                 onChange={(e) => setManualDraft((p) => (p ? { ...p, unit: e.target.value } : p))}
-                placeholder="단위"
+                placeholder="EA"
                 style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(0,0,0,0.25)", color: "white", outline: "none" }}
               />
               <input
-                value={String(manualDraft.qty ?? 0)}
+                value={manualDraft.qty}
                 onChange={(e) => setManualDraft((p) => (p ? { ...p, qty: num(e.target.value) } : p))}
                 placeholder="요청수량"
                 style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(0,0,0,0.25)", color: "white", outline: "none", textAlign: "right", fontVariantNumeric: "tabular-nums" }}
               />
-            </div>
-
-            <div style={{ marginTop: 10, display: "flex", gap: 10 }}>
               <input
                 value={manualDraft.note}
                 onChange={(e) => setManualDraft((p) => (p ? { ...p, note: e.target.value } : p))}
                 placeholder="비고"
-                style={{ flex: 1, padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(0,0,0,0.25)", color: "white", outline: "none" }}
+                style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(0,0,0,0.25)", color: "white", outline: "none" }}
               />
-              <SmallBtn
-                onClick={() => {
-                  const d = manualDraft;
-                  if (!d || !d.name.trim()) return alert("자재명을 입력하세요.");
-                  addItem({
-                    source: "MANUAL",
-                    product_id: null,
-                    estimate_item_id: null,
-                    item_name_snapshot: d.name.trim(),
-                    spec_snapshot: d.spec ?? "",
-                    unit_snapshot: d.unit ?? "",
-                    qty_requested: num(d.qty),
-                    note: d.note ?? "",
-                  });
-                  setManualDraft(null);
-                }}
-              >
-                추가
-              </SmallBtn>
-              <SmallBtn onClick={() => setManualDraft(null)}>취소</SmallBtn>
+
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <SmallBtn
+                  onClick={() => {
+                    const d = manualDraft;
+                    if (!d || !d.name.trim()) return alert("자재명을 입력하세요.");
+
+                    addItem({
+                      source: "MANUAL",
+                      product_id: null,
+                      estimate_item_id: null,
+                      item_name_snapshot: d.name.trim(),
+                      spec_snapshot: d.spec ?? "",
+                      unit_snapshot: (d.unit ?? "EA").toString() || "EA",
+                      qty_requested: num(d.qty),
+                      note: d.note ?? "",
+                    });
+
+                    setManualDraft(null);
+                  }}
+                >
+                  추가
+                </SmallBtn>
+                <SmallBtn onClick={() => setManualDraft(null)}>취소</SmallBtn>
+              </div>
             </div>
           </div>
         )}
       </div>
 
-      <div style={{ marginTop: 18, fontWeight: 900 }}>요청 항목 {loading ? "(불러오는 중…)" : `(${items.length})`}</div>
+      {/* 요청 항목 */}
+      <div style={{ marginTop: 14, fontWeight: 950, fontSize: 18 }}>
+        요청 항목 {loading ? "(불러오는 중…)" : `(${items.length})`}
+      </div>
 
-      {/* 섹션(신규등록처럼) */}
-      {!loading && grouped.est.length > 0 && (
-        <SectionBox kind="estimate" title="견적서 리스트" count={grouped.est.length} right={undefined}>
-          {renderEditableTable(grouped.est, false)}
-        </SectionBox>
-      )}
+      {!loading && grouped.est.length > 0 && <SectionBox kind="estimate" title="견적서 재료비" count={grouped.est.length}>{renderEditableTable(grouped.est, false, "estimate")}</SectionBox>}
 
       {!loading && grouped.prod.length > 0 && (
         <SectionBox
           kind="uplink"
-          title="업링크 자재 리스트"
+          title="업링크 제품"
           count={grouped.prod.length}
           right={<SmallBtn onClick={openProductModal}>추가</SmallBtn>}
         >
-          {renderEditableTable(grouped.prod, true)}
+          {renderEditableTable(grouped.prod, true, "uplink")}
         </SectionBox>
       )}
 
       {!loading && grouped.man.length > 0 && (
         <SectionBox
           kind="manual"
-          title="수동 자재 리스트"
+          title="수동 추가"
           count={grouped.man.length}
-          right={<SmallBtn onClick={() => setManualDraft({ name: "", spec: "", unit: "", qty: 0, note: "" })}>추가</SmallBtn>}
+          right={<SmallBtn onClick={() => setManualDraft({ name: "", spec: "", unit: "EA", qty: 0, note: "" })}>추가</SmallBtn>}
         >
-          {renderEditableTable(grouped.man, true)}
+          {renderEditableTable(grouped.man, true, "manual")}
         </SectionBox>
       )}
 
-      {!loading && items.length === 0 && (
-        <div
-          style={{
-            marginTop: 14,
-            padding: 14,
-            borderRadius: 14,
-            border: "1px solid rgba(255,255,255,0.10)",
-            background: "rgba(255,255,255,0.04)",
-            opacity: 0.9,
-          }}
-        >
-          저장된 요청 항목이 없습니다.
+      {!loading && items.length === 0 && <div style={{ marginTop: 10, opacity: 0.85 }}>저장된 요청 항목이 없습니다.</div>}
+
+
+      {/* 자재요청 참고사항(수기) */}
+      {!loading && (
+        <div style={{ marginTop: 14, padding: 12, border: "1px solid rgba(255,255,255,0.15)", borderRadius: 10 }}>
+          <div style={{ fontWeight: 900, marginBottom: 8 }}>자재요청 참고사항</div>
+          <textarea
+            value={mrMemo}
+            onChange={(e) => setMrMemo(e.target.value)}
+            placeholder="자재 요청 및 준비시 참고사항에 대해 적어주세요"
+            rows={4}
+            style={{
+              width: "100%",
+              resize: "vertical",
+              padding: 10,
+              borderRadius: 8,
+              border: "1px solid rgba(255,255,255,0.15)",
+              background: "rgba(0,0,0,0.2)",
+              color: "white",
+              outline: "none",
+              fontSize: 13,
+            }}
+          />
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+            <button
+              onClick={saveMrMemo}
+              disabled={mrMemoSaving}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: "1px solid rgba(255,255,255,0.2)",
+                background: mrMemoSaving ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.12)",
+                color: "white",
+                cursor: mrMemoSaving ? "not-allowed" : "pointer",
+                fontWeight: 900,
+              }}
+            >
+              {mrMemoSaving ? "저장 중…" : "저장"}
+            </button>
+          </div>
         </div>
       )}
 
@@ -671,113 +784,54 @@ export default function MaterialRequestDetailPage() {
       {productModalOpen && (
         <div
           onClick={() => setProductModalOpen(false)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.55)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 16,
-            zIndex: 50,
-          }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 50 }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            style={{
-              width: 860,
-              height: 640,
-              overflow: "hidden",
-              borderRadius: 16,
-              border: "1px solid rgba(255,255,255,0.14)",
-              background: "rgba(17,24,39,0.98)",
-              color: "white",
-              padding: 14,
-              display: "flex",
-              flexDirection: "column",
-            }}
+            style={{ width: 860, height: 640, overflow: "hidden", borderRadius: 16, border: "1px solid rgba(255,255,255,0.14)", background: "rgba(17,24,39,0.98)", color: "white", padding: 14, display: "flex", flexDirection: "column" }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-              <div style={{ fontWeight: 900, fontSize: 16 }}>업링크 제품 선택</div>
-              <SmallBtn onClick={() => setProductModalOpen(false)}>닫기</SmallBtn>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <div style={{ fontWeight: 950 }}>업링크 제품 선택</div>
+              <button onClick={() => setProductModalOpen(false)} style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "white", cursor: "pointer", fontWeight: 900 }}>
+                닫기
+              </button>
             </div>
 
-            <div style={{ marginTop: 12 }}>
-              <input
-                value={productKeyword}
-                onChange={(e) => setProductKeyword(e.target.value)}
-                placeholder="제품 검색(이름/규격) - 입력하면 자동 검색됩니다"
-                style={{
-                  width: "100%",
-                  padding: "10px 12px",
-                  borderRadius: 10,
-                  border: "1px solid rgba(255,255,255,0.15)",
-                  background: "rgba(0,0,0,0.25)",
-                  color: "white",
-                  outline: "none",
-                }}
-              />
-              <div style={{ marginTop: 8, fontSize: 12, opacity: 0.75 }}>
-                {productLoading ? "검색중…" : productKeyword.trim() ? `검색 결과 · ${products.length}건` : `전체 · ${products.length}건`}
-              </div>
+            <input
+              value={productKeyword}
+              onChange={(e) => setProductKeyword(e.target.value)}
+              placeholder="제품 검색(이름/규격) - 입력하면 자동 검색됩니다"
+              style={{ width: "100%", marginTop: 10, padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(0,0,0,0.25)", color: "white", outline: "none" }}
+            />
+
+            <div style={{ marginTop: 10, opacity: 0.85, fontWeight: 900 }}>
+              {productLoading ? "검색중…" : productKeyword.trim() ? `검색 결과 · ${products.length}건` : `전체 · ${products.length}건`}
             </div>
+            {productError && <div style={{ marginTop: 10, padding: 10, borderRadius: 12, border: "1px solid rgba(255,80,80,0.45)", background: "rgba(255,80,80,0.10)" }}>{productError}</div>}
 
-            {productError && <div style={{ marginTop: 10, fontSize: 12, color: "#ffb4b4", whiteSpace: "pre-wrap" }}>{productError}</div>}
+            <div style={{ marginTop: 10, overflow: "auto", paddingRight: 4, flex: 1 }}>
+              {!productLoading && products.length === 0 && <div style={{ padding: 12, opacity: 0.85 }}>표시할 제품이 없습니다.</div>}
 
-            <div style={{ marginTop: 12, flex: 1, overflow: "auto", paddingRight: 4 }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {!productLoading && products.length === 0 && (
-                  <div style={{ padding: 12, borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)", opacity: 0.75 }}>
-                    표시할 제품이 없습니다.
-                  </div>
-                )}
-
-                {products.map((p) => (
-                  <div
-                    key={p.id}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 12,
-                      padding: 12,
-                      borderRadius: 14,
-                      border: "1px solid rgba(255,255,255,0.12)",
-                      background: "rgba(255,255,255,0.04)",
-                    }}
-                  >
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 900, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
-                      <div style={{ marginTop: 4, fontSize: 12, opacity: 0.85, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {p.spec ?? "-"} · 단위: {p.unit ?? "EA"}
-                      </div>
+              {products.map((p) => (
+                <div key={p.id} style={{ padding: "10px 10px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+                  <div>
+                    <div style={{ fontWeight: 950 }}>{p.name}</div>
+                    <div style={{ opacity: 0.85, fontSize: 13, marginTop: 2 }}>
+                      {p.spec ?? "-"} · 단위: {p.unit ?? "EA"}
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={() => addUplinkProductAndClose(p)}
-                      style={{
-                        flexShrink: 0,
-                        padding: "10px 12px",
-                        borderRadius: 12,
-                        border: "1px solid rgba(255,255,255,0.15)",
-                        background: "rgba(255,255,255,0.10)",
-                        color: "white",
-                        cursor: "pointer",
-                        fontWeight: 900,
-                      }}
-                    >
-                      추가
-                    </button>
                   </div>
-                ))}
-              </div>
+                  <button onClick={() => addUplinkProductAndClose(p)} style={{ flexShrink: 0, padding: "10px 12px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.10)", color: "white", cursor: "pointer", fontWeight: 900 }}>
+                    추가
+                  </button>
+                </div>
+              ))}
             </div>
 
-            <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>· “추가”를 누르면 즉시 모달이 닫히며, 업링크 자재 리스트에 1건이 추가됩니다.</div>
+            <div style={{ opacity: 0.8, fontSize: 12 }}>· “추가”를 누르면 즉시 모달이 닫히며, 업링크 자재 리스트에 1건이 추가됩니다.</div>
           </div>
         </div>
       )}
     </div>
+    </ErrorBoundary>
   );
 }
