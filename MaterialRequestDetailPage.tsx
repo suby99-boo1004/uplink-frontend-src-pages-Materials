@@ -650,6 +650,7 @@ export default function MaterialRequestDetailPage() {
   return (
     <ErrorBoundary>
     <div style={{ padding: 18, color: "white" }}>
+      <div style={{ position: "sticky", top: 0, zIndex: 50, background: "rgba(17,24,39,0.98)" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <div>
           <div style={{ fontSize: 22, fontWeight: 950 }}>자재요청 사업명 : {title}</div>
@@ -662,6 +663,7 @@ export default function MaterialRequestDetailPage() {
         >
           목록으로
         </button>
+      </div>
       </div>
 
       {error && (
