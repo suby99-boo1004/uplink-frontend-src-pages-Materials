@@ -302,8 +302,9 @@ export default function MaterialRequestNewPage() {
     const found = estimates.find((x) => x.id === nextId);
     if (found) {
       const name = (found.project_name && found.project_name.trim()) || (found.title && found.title.trim()) || `견적서 #${found.id}`;
-      setProjectName(name);
+      if (!projectName.trim()) setProjectName(name);
     }
+
 
     loadEstimateDetailAndFill(nextId);
   }
@@ -394,11 +395,7 @@ export default function MaterialRequestNewPage() {
     setSaveError(null);
 
     try {
-      if (!estimateId) {
-        setSaveError("견적서를 선택하세요.");
-        setSaving(false);
-        return;
-      }
+      if (!projectName.trim()) { setSaveError("자재요청 건명을 넣으세요"); setSaving(false); return; }
 
       // ✅ 저장 직전 안전 정규화(소스/단위/수량)
       const normalized = lines.map((ln) => {
@@ -413,7 +410,7 @@ export default function MaterialRequestNewPage() {
       const payload: any = {
         project_name: projectName || "",
         memo: projectName || "",
-        estimate_id: Number(estimateId),
+        estimate_id: estimateId ? Number(estimateId) : undefined,
         items: normalized.map((ln) => ({
           source: ln.source, // ESTIMATE/PRODUCT/MANUAL
           product_id: ln.product_id ?? null,
@@ -646,7 +643,7 @@ export default function MaterialRequestNewPage() {
           <input
             value={projectName}
             onChange={(e) => setProjectName(e.target.value)}
-            placeholder={"견적서 선택 시 자동 입력됩니다 (편집 가능)"}
+            placeholder={"자재요청 건명(필수) - 직접 입력하세요 (견적서 선택 시 자동 입력 가능)"}
             style={{ width: "40%", minWidth: 280, padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(17,24,39,0.70)", color: "white", outline: "none" }}
           />
           <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
