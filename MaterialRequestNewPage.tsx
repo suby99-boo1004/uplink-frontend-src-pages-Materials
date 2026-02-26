@@ -409,7 +409,7 @@ export default function MaterialRequestNewPage() {
 
       const payload: any = {
         project_name: projectName || "",
-        memo: projectName || "",
+        memo: "",
         estimate_id: estimateId ? Number(estimateId) : undefined,
         items: normalized.map((ln) => ({
           source: ln.source, // ESTIMATE/PRODUCT/MANUAL

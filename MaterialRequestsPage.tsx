@@ -17,6 +17,7 @@ type MRRow = {
   request_no?: string | null;
   business_name?: string | null;
   status?: string | null;
+  is_pinned?: boolean | null;
 };
 
 function fmtDateTimeParts(s?: string | null) {
@@ -33,6 +34,22 @@ function fmtDateTimeParts(s?: string | null) {
   } catch {
     return { date: s || "-", time: "" };
   }
+}
+
+const PINNED_KEY = "mr_pinned_ids";
+function _loadPinnedIds(): number[] {
+  try {
+    const raw = localStorage.getItem(PINNED_KEY) || "[]";
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0) : [];
+  } catch {
+    return [];
+  }
+}
+function _isPinnedFromStorage(id: number): boolean {
+  if (!id) return false;
+  const set = new Set(_loadPinnedIds());
+  return set.has(id);
 }
 
 function prepLabel(v?: string | null) {
@@ -103,7 +120,9 @@ export default function MaterialRequestsPage() {
       qs.set("_ts", String(Date.now()));
 
       const res = await api<{ items: MRRow[] }>(`/api/material-requests?${qs.toString()}`);
-      setRows(Array.isArray(res?.items) ? res.items : []);
+      const base = Array.isArray(res?.items) ? res.items : [];
+      const enriched = base.map((r) => ({ ...r, is_pinned: typeof (r as any).is_pinned === "boolean" ? (r as any).is_pinned : _isPinnedFromStorage(r.id) }));
+      setRows(enriched);
     } catch (e: any) {
       setRows([]);
       setError(e?.message || "목록을 불러오지 못했습니다.");

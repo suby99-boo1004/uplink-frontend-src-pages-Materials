@@ -31,6 +31,7 @@ type MRHeader = {
   requested_by_name?: string | null;
   created_at?: string | null;
   business_name?: string | null;
+  is_pinned?: boolean | null;
 };
 
 type MRItem = {
@@ -154,6 +155,29 @@ function num(v: any) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 }
+const PINNED_KEY = "mr_pinned_ids";
+function _loadPinnedIds(): number[] {
+  try {
+    const raw = localStorage.getItem(PINNED_KEY) || "[]";
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0) : [];
+  } catch {
+    return [];
+  }
+}
+function _isPinnedFromStorage(id: number): boolean {
+  if (!id) return false;
+  const set = new Set(_loadPinnedIds());
+  return set.has(id);
+}
+function _setPinnedToStorage(id: number, pinned: boolean) {
+  if (!id) return;
+  const set = new Set(_loadPinnedIds());
+  if (pinned) set.add(id);
+  else set.delete(id);
+  localStorage.setItem(PINNED_KEY, JSON.stringify(Array.from(set)));
+}
+
 
 export default function MaterialRequestDetailPage() {
   const navigate = useNavigate();
@@ -167,6 +191,7 @@ export default function MaterialRequestDetailPage() {
   const [canSeeSensitive, setCanSeeSensitive] = useState(false);
   const [header, setHeader] = useState<MRHeader | null>(null);
   const [items, setItems] = useState<MRItem[]>([]);
+  const [isPinned, setIsPinned] = useState(false);
 
   // 자재요청 참고사항(헤더 메모)
   const [mrMemo, setMrMemo] = useState<string>("");
@@ -198,7 +223,10 @@ export default function MaterialRequestDetailPage() {
       try {
         const res = (await api(`/api/material-requests/${mrId}`)) as DetailRes;
         setCanSeeSensitive(!!(res as any)?.can_see_sensitive);
-        setHeader((res as any)?.header ?? null);
+        const h = (res as any)?.header ?? null;
+        setHeader(h);
+        const pin = (h as any)?.is_pinned;
+        setIsPinned(typeof pin === "boolean" ? pin : _isPinnedFromStorage(mrId));
         if (!memoInitRef.current) {
           const h: any = (res as any)?.header ?? {};
           const rawMemo = (h?.memo ?? "") as string;
@@ -327,12 +355,33 @@ export default function MaterialRequestDetailPage() {
     }
   }
 
-  async function saveMrMemo() {
+  
+  async function togglePinned(next: boolean) {
+    setIsPinned(next);
+    // 로컬 저장(백엔드 컬럼이 없을 수 있는 환경 대비)
+    _setPinnedToStorage(mrId, next);
+    try {
+      await api(`/api/material-requests/${mrId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_pinned: next }),
+      });
+      // 서버가 반영 가능하면 헤더도 동기화
+      memoInitRef.current = false;
+      await reloadRef.current();
+    } catch {
+      // 서버 미지원/컬럼 없음 등: 로컬 저장만 유지
+    }
+  }
+
+async function saveMrMemo() {
     if (!mrId) return;
-    if (!mrMemo.trim()) {
+ /*   if (!mrMemo.trim()) {
       alert("자재요청 건명을 넣으세요");
       return;
     }
+	*/
+	
     setMrMemoSaving(true);
     try {
       await api(`/api/material-requests/${mrId}`, {
@@ -657,12 +706,24 @@ export default function MaterialRequestDetailPage() {
           
         </div>
 
-        <button
-          onClick={() => navigate("/materials")}
-          style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "white", cursor: "pointer", fontWeight: 900 }}
-        >
-          목록으로
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", fontWeight: 900, opacity: 0.95 }}>
+            <input
+              type="checkbox"
+              checked={isPinned}
+              onChange={(e) => togglePinned(e.currentTarget.checked)}
+              style={{ width: 18, height: 18, cursor: "pointer" }}
+            />
+            상단 고정
+          </label>
+
+          <button
+            onClick={() => navigate("/materials")}
+            style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "white", cursor: "pointer", fontWeight: 900 }}
+          >
+            목록으로
+          </button>
+        </div>
       </div>
       </div>
 
