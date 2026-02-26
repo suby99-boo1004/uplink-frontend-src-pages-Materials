@@ -92,7 +92,9 @@ export default function MaterialRequestsPage() {
     });
     return arr;
   }, [rows]);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [canDelete, setCanDelete] = useState(false);
+  const gridCols = canDelete ? "36px 140px 1fr 140px 120px 90px" : "36px 140px 1fr 140px 120px";
+
 
   const tabs = useMemo(
     () => [
@@ -139,15 +141,15 @@ export default function MaterialRequestsPage() {
     fetchList();
   }
 
-  // 관리자만 "삭제" 버튼 노출
+  // 관리자/운영자만 "삭제" 버튼 노출
   useEffect(() => {
     (async () => {
       try {
         const me = await api(`/api/auth/me?_ts=${Date.now()}`);
         const rid = Number(me?.role?.id ?? me?.role_id ?? me?.roleId ?? me?.role?.role_id ?? null);
-        setIsAdmin(rid === 6);
+        setCanDelete(rid === 6 || rid === 7);
       } catch {
-        setIsAdmin(false);
+        setCanDelete(false);
       }
     })();
   }, []);
@@ -159,7 +161,7 @@ export default function MaterialRequestsPage() {
   }, [tab, location.search]);
 
   async function onDelete(mrId: number) {
-    if (!isAdmin) return;
+    if (!canDelete) return;
     const ok = window.confirm("이 자재요청을 삭제할까요?\n삭제하면 신규등록(견적서 선택)에도 즉시 반영됩니다.");
     if (!ok) return;
 
@@ -280,13 +282,14 @@ export default function MaterialRequestsPage() {
       {/* 리스트 */}
       <div style={{ marginTop: 14, borderRadius: 16, overflow: "hidden", border: "1px solid rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.22)" }}>
       
-        <div style={{ display: "grid", gridTemplateColumns: "140px 1fr 140px 120px 90px", gap: 0, 
+        <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 0, 
 		background: "#8ec7fa", padding: "10px 12px", fontWeight: 900, color: "#000000",}}>
+          <div style={{ textAlign: "center" }}>📌</div>
           <div>등록일</div>
           <div>사업명</div>
           <div>등록자</div>
           <div>준비상태</div>
-          <div style={{ textAlign: "center" }}>삭제</div>
+          {canDelete && <div style={{ textAlign: "center" }}>삭제</div>}
         </div>
 
         {!loading && rows.length === 0 && <div style={{ padding: 14, opacity: 0.8 }}>표시할 데이터가 없습니다.</div>}
@@ -308,13 +311,15 @@ export default function MaterialRequestsPage() {
               onClick={() => navigate(`/materials/${r.id}`)}
               style={{
                 display: "grid",
-                gridTemplateColumns: "140px 1fr 140px 120px 90px",
+                gridTemplateColumns: gridCols,
                 gap: 0,
                 padding: "10px 12px",
                 borderTop: "1px solid rgba(255,255,255,0.06)",
                 cursor: "pointer",
               }}
             >
+              <div style={{ textAlign: "center", fontSize: 16 }}>{r.is_pinned ? "📌" : ""}</div>
+
               <div style={{ fontVariantNumeric: "tabular-nums" }}>
                 <div>{dt.date}</div>
                 <div style={{ opacity: 0.8, fontSize: 12 }}>{dt.time}</div>
@@ -325,16 +330,15 @@ export default function MaterialRequestsPage() {
               <div style={{ opacity: 0.95 }}>{r.requested_by_name || "-"}</div>
 
               <div style={{ fontWeight: 900 }}>{prepLabel(r.prep_status || null)}</div>
-
-              <div style={{ display: "flex", justifyContent: "center" }}>
-                {isAdmin ? (
+              {canDelete && (
+                <div style={{ display: "flex", justifyContent: "center" }}>
                   <button
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
                       onDelete(r.id);
                     }}
-                    title="삭제(관리자 전용)"
+                    title="삭제(관리자/운영자)"
                     style={{
                       minWidth: 56,
                       height: 28,
@@ -348,10 +352,8 @@ export default function MaterialRequestsPage() {
                   >
                     삭제
                   </button>
-                ) : (
-                  <div style={{ opacity: 0.35 }}>-</div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           );
         })}

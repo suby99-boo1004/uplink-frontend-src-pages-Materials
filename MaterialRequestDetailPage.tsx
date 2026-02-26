@@ -711,8 +711,16 @@ async function saveMrMemo() {
             <input
               type="checkbox"
               checked={isPinned}
-              onChange={(e) => togglePinned(e.currentTarget.checked)}
-              style={{ width: 18, height: 18, cursor: "pointer" }}
+              disabled={!canSeeSensitive}
+              onChange={(e) => {
+                if (!canSeeSensitive) return;
+                const next = e.currentTarget.checked;
+                const ok = window.confirm(next ? "상단 고정 하시겠습니까?" : "상단 고정을 해제하시겠습니까?");
+                if (!ok) return;
+                togglePinned(next);
+              }}
+              title={!canSeeSensitive ? "관리자/운영자만 변경할 수 있습니다." : ""}
+              style={{ width: 18, height: 18, cursor: canSeeSensitive ? "pointer" : "not-allowed" }}
             />
             상단 고정
           </label>
