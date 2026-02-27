@@ -695,6 +695,21 @@ async function saveMrMemo() {
       </div>
     );
   }
+const thStyle = {
+  background: "#323638",
+  border: "1px solid #d9dee7",
+  padding: "10px 12px",
+  textAlign: "left" as const,
+  fontWeight: 700,
+  width: 160,
+};
+
+const tdStyle = {
+  border: "1px solid #d9dee7",
+  padding: "10px 12px",
+  fontWeight: 500,
+  
+};
 
   return (
     <ErrorBoundary>
@@ -751,9 +766,33 @@ async function saveMrMemo() {
   fontSize: 20,
   display: "flex",
   gap: 50
+  
 }}>
-  <div>등록자: {header?.requested_by_name || "-"},</div>
-  <div>등록일: {fmtDateTime(header?.created_at || null)}</div>
+
+
+
+
+
+
+  
+  
+	  
+	  
+  <tr>
+          <th style={thStyle}>등록자</th>
+          <td style={tdStyle}>{header?.requested_by_name || "-"}</td>
+          <th style={thStyle}>등록일</th>
+          <td style={tdStyle}>{fmtDateTime(header?.created_at || null)}</td>
+        </tr>
+  
+  
+  
+  
+  
+  
+  
+  
+  
 </div>
 		  
 		  

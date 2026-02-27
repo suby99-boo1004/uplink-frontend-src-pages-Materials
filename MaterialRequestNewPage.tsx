@@ -606,7 +606,7 @@ export default function MaterialRequestNewPage() {
 
         <button
           onClick={() => navigate("/materials")}
-          style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "white", cursor: "pointer", fontWeight: 900 }}
+          style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.15)", background: "linear-gradient(180deg, #2563EB 0%, #1D4ED8 100%)", color: "white", cursor: "pointer", fontWeight: 900 }}
         >
           목록으로
         </button>
@@ -687,7 +687,7 @@ export default function MaterialRequestNewPage() {
         <button
           onClick={handleSave}
           disabled={saving}
-          style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.18)", background: saving ? "rgba(255,255,255,0.08)" : "rgba(34,197,94,0.22)", color: "white", cursor: saving ? "not-allowed" : "pointer", fontWeight: 950, fontSize: 13 }}
+          style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.18)", background: saving ? "rgba(255,255,255,0.08)" : "rgba(34,197,94,0.22)", color: "white", cursor: saving ? "not-allowed" : "pointer", fontWeight: 950 }}
         >
           {saving ? "등록 중…" : "등록 완료"}
         </button>
